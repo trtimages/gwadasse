@@ -1,242 +1,117 @@
-import React from "react";
-import { Link, useParams } from "react-router-dom";
+// src/screens/ReportScreen.jsx
+import React, { useState } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import Layout from "../components/Layout.jsx";
 import { beaches } from "../data/beaches.js";
+import { ChevronLeft, MapPin, Send } from "lucide-react";
 
-/* =======================
-   Utils: distance (Haversine)
-======================= */
-function toRad(deg) {
-  return (deg * Math.PI) / 180;
+// Fonction interne pour compter les votes par niveau sur 24h
+function getVoteCount(allReports, beachId, type, level) {
+    const now = Date.now();
+    const dayInMs = 24 * 60 * 60 * 1000;
+    return (allReports || []).filter(
+        (r) => r.beachId === beachId && r.type === type && r.level === level && (now - r.ts) <= dayInMs
+    ).length;
 }
 
-function distanceMeters(a, b) {
-  const R = 6371000;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
+function MiniGrid({ title, options, current, onChange, reports, beachId, kind }) {
+    return (
+        <div className="mb-2">
+            <div className="text-[8px] font-black text-slate-400 uppercase tracking-wider mb-1 ml-1 flex justify-between">
+                <span>{title}</span>
+                <span className="opacity-50 italic">Dernières 24h</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+                {options.map((opt) => {
+                    const active = current === opt.lvl;
+                    const votes = getVoteCount(reports, beachId, kind, opt.lvl);
 
-  const x =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-  return R * c;
-}
-
-/* =======================
-   Small UI components
-======================= */
-function Card({ title, children, hint }) {
-  return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-      <div className="font-extrabold text-gray-900">{title}</div>
-      <div className="mt-3 grid gap-2">{children}</div>
-      {hint ? <div className="mt-3 text-xs text-gray-500">{hint}</div> : null}
-    </div>
-  );
-}
-
-function PickButton({ active, onClick, icon, label }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border text-left transition",
-        active
-          ? "border-black bg-gray-50"
-          : "border-gray-200 bg-white hover:bg-gray-50",
-      ].join(" ")}
-    >
-      <span className="flex items-center gap-3">
-        <span className="text-lg">{icon}</span>
-        <span className="font-extrabold text-gray-900">{label}</span>
-      </span>
-      <span className="text-xs text-gray-500">{active ? "Sélectionné" : ""}</span>
-    </button>
-  );
-}
-
-/* =======================
-   Screen: Report
-   - GPS check kept but NON-BLOCKING for dev
-======================= */
-export default function ReportScreen({ addReports, userPosition, gpsError }) {
-  const { beachId } = useParams();
-  const beachIdNum = Number(beachId);
-  const beach = beaches.find((b) => b.id === beachIdNum);
-
-  const [sargasses, setSargasses] = React.useState(0);
-  const [rain, setRain] = React.useState(0);
-  const [swim, setSwim] = React.useState(0);
-
-  function toggle(setter, current, value) {
-    setter(current === value ? 0 : value);
-  }
-
-  function submit() {
-    if (!sargasses && !rain && !swim) {
-      alert("Choisis au moins 1 info à signaler 🙂");
-      return;
-    }
-
-    if (!Number.isFinite(beachIdNum) || !beach) {
-      alert("Plage invalide.");
-      return;
-    }
-
-    // GPS check (DEV non bloquant)
-    if (
-      userPosition &&
-      Number.isFinite(userPosition.lat) &&
-      Number.isFinite(userPosition.lng) &&
-      Number.isFinite(beach.lat) &&
-      Number.isFinite(beach.lng)
-    ) {
-      const d = distanceMeters(
-        { lat: userPosition.lat, lng: userPosition.lng },
-        { lat: beach.lat, lng: beach.lng }
-      );
-
-      const radius = beach.radius ?? 500;
-
-      if (d > radius) {
-        alert(
-          `(DEV) Tu es à ~${Math.round(d)} m de cette plage (rayon ${radius} m). Signalement envoyé quand même.`
-        );
-      }
-    }
-
-    const ts = Date.now();
-    const batch = [];
-
-    if (sargasses) batch.push({ beachId: beachIdNum, type: "sargasses", level: sargasses, ts });
-    if (rain) batch.push({ beachId: beachIdNum, type: "rain", level: rain, ts });
-    if (swim) batch.push({ beachId: beachIdNum, type: "swim", level: swim, ts });
-
-    addReports(batch);
-
-    // retour fiche plage (simple)
-    window.location.href = `/beach/${beachIdNum}`;
-  }
-
-  const canSend = !!(sargasses || rain || swim);
-
-  return (
-    <Layout>
-      {/* Top block */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-        <div className="text-lg font-extrabold text-gray-900">Signaler</div>
-        <div className="mt-1 text-sm text-gray-600">
-          {beach ? (
-            <>
-              <span className="font-semibold">{beach.name}</span> — {beach.town} • {beach.island}
-            </>
-          ) : (
-            "Plage inconnue"
-          )}
+                    return (
+                        <button
+                            key={opt.lvl}
+                            type="button"
+                            onClick={() => onChange(active ? 0 : opt.lvl)}
+                            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-lg border transition-all ${active
+                                    ? "bg-slate-800 border-slate-800 text-white shadow-sm"
+                                    : "bg-white border-gray-100 text-slate-500"
+                                }`}
+                        >
+                            <span className="text-sm">{opt.icon}</span>
+                            <div className="flex items-center gap-1">
+                                <span className="text-[7px] font-black uppercase truncate">{opt.label}</span>
+                                <span className={`text-[8px] font-bold ${active ? "text-cyan-300" : "text-slate-400"}`}>
+                                    {votes}
+                                </span>
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
         </div>
+    );
+}
 
-        <div className="mt-3 text-xs text-gray-500">
-          {userPosition ? (
-            <>📍 Vérif GPS active (dev : non bloquante)</>
-          ) : gpsError ? (
-            <>📍 GPS indisponible ({gpsError})</>
-          ) : (
-            <>📍 GPS en attente…</>
-          )}
-        </div>
+export default function ReportScreen({ reports = [], addReports, userPosition }) {
+    const { beachId } = useParams();
+    const navigate = useNavigate();
+    const beachIdNum = Number(beachId);
+    const beach = beaches.find((b) => b.id === beachIdNum);
 
-        <div className="mt-3">
-          <Link to={`/beach/${beachIdNum}`} className="text-sm text-gray-700 underline">
-            ← Retour fiche plage
-          </Link>
-        </div>
-      </div>
+    const [sargasses, setSargasses] = useState(0);
+    const [sun, setSun] = useState(0);
+    const [swim, setSwim] = useState(0);
+    const [crowd, setCrowd] = useState(0);
 
-      <div className="mt-3 grid gap-3">
-        <Card title="Sargasses" hint="Retape sur le même choix pour l’enlever.">
-          <PickButton
-            active={sargasses === 1}
-            onClick={() => toggle(setSargasses, sargasses, 1)}
-            icon="🟢"
-            label="Aucune"
-          />
-          <PickButton
-            active={sargasses === 2}
-            onClick={() => toggle(setSargasses, sargasses, 2)}
-            icon="🟠"
-            label="Modérées"
-          />
-          <PickButton
-            active={sargasses === 3}
-            onClick={() => toggle(setSargasses, sargasses, 3)}
-            icon="🔴"
-            label="Importantes"
-          />
-        </Card>
+    if (!beach) return <Layout>Plage inconnue</Layout>;
 
-        <Card title="Pluie sur place" hint="Retape sur le même choix pour l’enlever.">
-          <PickButton
-            active={rain === 1}
-            onClick={() => toggle(setRain, rain, 1)}
-            icon="☀️"
-            label="Pas de pluie"
-          />
-          <PickButton
-            active={rain === 2}
-            onClick={() => toggle(setRain, rain, 2)}
-            icon="🌦️"
-            label="Averses"
-          />
-          <PickButton
-            active={rain === 3}
-            onClick={() => toggle(setRain, rain, 3)}
-            icon="🌧️"
-            label="Forte pluie"
-          />
-        </Card>
+    const submit = () => {
+        if (!(sargasses || sun || swim || crowd)) return;
+        const ts = Date.now();
+        const batch = [];
+        if (sargasses) batch.push({ beachId: beachIdNum, type: "sargasses", level: sargasses, ts });
+        if (sun) batch.push({ beachId: beachIdNum, type: "sun", level: sun, ts });
+        if (swim) batch.push({ beachId: beachIdNum, type: "swim", level: swim, ts });
+        if (crowd) batch.push({ beachId: beachIdNum, type: "crowd", level: crowd, ts });
 
-        <Card title="Baignade (drapeaux)" hint="Retape sur le même choix pour l’enlever.">
-          <PickButton
-            active={swim === 1}
-            onClick={() => toggle(setSwim, swim, 1)}
-            icon="🟢"
-            label="Drapeau vert"
-          />
-          <PickButton
-            active={swim === 2}
-            onClick={() => toggle(setSwim, swim, 2)}
-            icon="🟠"
-            label="Drapeau jaune"
-          />
-          <PickButton
-            active={swim === 3}
-            onClick={() => toggle(setSwim, swim, 3)}
-            icon="🔴"
-            label="Drapeau rouge"
-          />
-        </Card>
-      </div>
+        addReports(batch);
+        navigate(`/beach/${beachIdNum}`);
+    };
 
-      {/* Submit */}
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!canSend}
-        className={[
-          "mt-4 w-full rounded-2xl px-4 py-3 font-extrabold transition",
-          canSend
-            ? "bg-black text-white hover:bg-gray-900 active:scale-[0.99]"
-            : "bg-gray-300 text-gray-600 cursor-not-allowed",
-        ].join(" ")}
-      >
-        Envoyer le signalement
-      </button>
+    return (
+        <Layout>
+            {/* Header ultra-compact */}
+            <div className="flex items-center justify-between mb-2">
+                <Link to={`/beach/${beachIdNum}`} className="flex items-center text-slate-400 font-black text-[8px] uppercase tracking-tighter">
+                    <ChevronLeft size={10} /> Annuler
+                </Link>
+                <div className="text-[8px] font-black text-slate-400 uppercase italic flex items-center gap-1">
+                    <MapPin size={8} className={userPosition ? "text-green-500" : ""} />
+                    {beach.name}
+                </div>
+            </div>
 
-      <div className="h-6" />
-    </Layout>
-  );
+            <div className="space-y-1">
+                <MiniGrid title="Sargasses" kind="sargasses" reports={reports} beachId={beachIdNum} current={sargasses} onChange={setSargasses}
+                    options={[{ lvl: 1, label: "Tranquille", icon: "🟢" }, { lvl: 2, label: "Moyen", icon: "🟠" }, { lvl: 3, label: "Envahi", icon: "🔴" }]} />
+
+                <MiniGrid title="Météo" kind="sun" reports={reports} beachId={beachIdNum} current={sun} onChange={setSun}
+                    options={[{ lvl: 1, label: "Soleil", icon: "☀️" }, { lvl: 2, label: "Couvert", icon: "☁️" }, { lvl: 3, label: "Pluie", icon: "🌧️" }]} />
+
+                <MiniGrid title="Baignade" kind="swim" reports={reports} beachId={beachIdNum} current={swim} onChange={setSwim}
+                    options={[{ lvl: 1, label: "OK", icon: "✅" }, { lvl: 2, label: "Risque", icon: "⚠️" }, { lvl: 3, label: "Interdite", icon: "🚫" }]} />
+
+                <MiniGrid title="Affluence" kind="crowd" reports={reports} beachId={beachIdNum} current={crowd} onChange={setCrowd}
+                    options={[{ lvl: 1, label: "Vide", icon: "👥" }, { lvl: 2, label: "Moyen", icon: "👫" }, { lvl: 3, label: "Bondé", icon: "🔥" }]} />
+            </div>
+
+            <button
+                onClick={submit}
+                disabled={!(sargasses || sun || swim || crowd)}
+                className={`mt-4 w-full py-2.5 rounded-lg font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-md transition-all ${(sargasses || sun || swim || crowd) ? "bg-[#1f7c8a] text-white" : "bg-gray-100 text-gray-400"
+                    }`}
+            >
+                <Send size={10} /> Envoyer
+            </button>
+        </Layout>
+    );
 }

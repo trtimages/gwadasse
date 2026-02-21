@@ -1,348 +1,252 @@
 // src/screens/BeachScreen.jsx
-import React from "react";
-import { Link, useParams } from "react-router-dom";
+import React, { useState } from "react";
+import { useParams, Link } from "react-router-dom";
 import Layout from "@/components/Layout.jsx";
 import { beaches } from "@/data/beaches.js";
 import { computeDecision } from "@/utils/reports.js";
+
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
 } from "@/components/ui/accordion";
 
-const WINDOW_MS = 3 * 60 * 60 * 1000; // 3 h
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
 
-function countsFromReports(list) {
-  const counts = { green: 0, orange: 0, red: 0 };
-  for (const r of list) {
-    if (r.level === 1) counts.green += 1;
-    else if (r.level === 2) counts.orange += 1;
-    else if (r.level === 3) counts.red += 1;
-  }
-  return counts;
-}
+const WINDOW_MS = 3 * 60 * 60 * 1000;
 
-function get24hCountsForType(allReports, beachId, type) {
-  const now = Date.now();
-  const window24h = 24 * 60 * 60 * 1000;
-  const recent = allReports.filter(
-    (r) => r.beachId === beachId && r.type === type && now - r.ts <= window24h
-  );
-  return countsFromReports(recent);
-}
-
+// --- UTILS ---
 function decisionText(kind, level) {
-  if (!level) return "Pas assez d’infos";
-  if (kind === "sargasses") return level === 1 ? "Aucune" : level === 2 ? "Modérée" : "Importante";
-  if (kind === "swim") return level === 1 ? "Autorisée" : level === 2 ? "Déconseillée" : "Interdite";
-  if (kind === "sun") return level === 1 ? "Soleil" : level === 2 ? "Couvert" : "Pluie";
-  if (kind === "crowd") return level === 1 ? "Calme" : level === 2 ? "Modéré" : "Foule";
-  return "";
+    if (!level) return "Pas d'info";
+    if (kind === "sargasses") return level === 1 ? "Aucune" : level === 2 ? "Modérée" : "Importante";
+    if (kind === "swim") return level === 1 ? "Autorisée" : level === 2 ? "Déconseillée" : "Interdite";
+    if (kind === "sun") return level === 1 ? "Soleil" : level === 2 ? "Couvert" : "Pluie";
+    if (kind === "crowd") return level === 1 ? "Calme" : level === 2 ? "Modéré" : "Foule";
+    return "";
 }
 
 function optionLabels(kind) {
-  if (kind === "sargasses") return ["Aucune", "Modérée", "Importante"];
-  if (kind === "swim") return ["Autorisée", "Déconseillée", "Interdite"];
-  if (kind === "sun") return ["Soleil", "Couvert", "Pluie"];
-  if (kind === "crowd") return ["Calme", "Modéré", "Foule"];
-  return ["Vert", "Orange", "Rouge"];
+    if (kind === "sargasses") return ["Aucune", "Modérée", "Forte"];
+    if (kind === "swim") return ["OK", "Bof", "Non"];
+    if (kind === "sun") return ["Soleil", "Nuage", "Pluie"];
+    if (kind === "crowd") return ["Vide", "Normal", "Plein"];
+    return ["Vert", "Orange", "Rouge"];
 }
 
 function iconForState(kind, level) {
-  const suffix = level === 1 ? "vert" : level === 2 ? "orange" : level === 3 ? "rouge" : "gris";
-  if (kind === "sargasses") return `/icone_sarg${suffix}.png`;
-  if (kind === "swim") return `/icone_interdiction${suffix}.png`;
-  if (kind === "sun") return `/icone_meteo${suffix}.png`;
-  if (kind === "crowd") return `/icone_affluence${suffix}.png`;
-  return `/icone_${suffix}.png`;
+    const suffix = level === 1 ? "vert" : level === 2 ? "orange" : level === 3 ? "rouge" : "gris";
+    if (kind === "sargasses") return `/icone_sarg${suffix}.png`;
+    if (kind === "swim") return `/icone_interdiction${suffix}.png`;
+    if (kind === "sun") return `/icone_meteo${suffix}.png`;
+    if (kind === "crowd") return `/icone_affluence${suffix}.png`;
+    return `/icone_${suffix}.png`;
 }
 
-function levelStyle(level, active = false) {
-  if (level === 1) {
-    return active
-      ? "bg-green-600 text-white border-green-700"
-      : "bg-green-50 text-green-900 border-green-200 hover:bg-green-100";
-  }
-  if (level === 2) {
-    return active
-      ? "bg-orange-500 text-white border-orange-600"
-      : "bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100";
-  }
-  return active
-    ? "bg-red-600 text-white border-red-700"
-    : "bg-red-50 text-red-900 border-red-200 hover:bg-red-100";
-}
+function EventItem({ value, title, kind, decision, selectedLevel, onPick, onSubmit }) {
+    const level = decision?.level || 0;
+    const labels = optionLabels(kind);
 
-function submitButtonStyle(selectedLevel) {
-  if (selectedLevel === 1) return "bg-green-600 hover:bg-green-700";
-  if (selectedLevel === 2) return "bg-orange-500 hover:bg-orange-600";
-  if (selectedLevel === 3) return "bg-red-600 hover:bg-red-700";
-  return "bg-gray-300 cursor-not-allowed";
-}
-
-function EventItem({
-  value,
-  title,
-  kind,
-  decision,
-  counts24h,
-  selectedLevel,
-  onPick,
-  onSubmit,
-}) {
-  const level = decision.level || 0;
-
-  const iconSrc = iconForState(kind, level);
-  const summary = decisionText(kind, level);
-  const labels = optionLabels(kind);
-
-  const items = [
-    { lvl: 1, label: labels[0], count: counts24h.green },
-    { lvl: 2, label: labels[1], count: counts24h.orange },
-    { lvl: 3, label: labels[2], count: counts24h.red },
-  ];
-
-  return (
-    <AccordionItem value={value} className="bg-white">
-      {/* Trigger 100% simple, aucun élément parasite => 1 clic ouvre / 1 clic ferme */}
-      <AccordionTrigger className="px-3 py-2 no-underline hover:no-underline data-[state=open]:bg-gray-100 hover:bg-gray-100 transition">
-        <div className="flex items-center gap-2 w-full">
-          <img src={iconSrc} alt="" aria-hidden="true" className="w-10 h-10 flex-shrink-0" />
-          <div className="min-w-0 flex-1 text-left">
-            <div className="font-extrabold text-[14px] leading-tight">
-              {title} — {summary}
-            </div>
-          </div>
-        </div>
-        <div className="ml-2 flex-shrink-0 pointer-events-none">
-  <div className="w-9 h-9 rounded-xl border border-gray-200 bg-white grid place-items-center">
-    <img src="/icone_info.png" alt="" className="w-5 h-5" />
-  </div>
-</div>
-
-      </AccordionTrigger>
-
-      <AccordionContent className="px-3 pb-3">
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <div className="font-bold text-[13px] mb-2">Derniers signalements</div>
-
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {items.map((it) => {
-              const active = selectedLevel === it.lvl;
-              return (
-                <button
-                  key={it.lvl}
-                  type="button"
-                  onClick={() => onPick(it.lvl)}
-                  className={[
-                    "flex-shrink-0 rounded-lg border px-3 py-2 text-[13px] font-extrabold transition",
-                    levelStyle(it.lvl, active),
-                  ].join(" ")}
-                >
-                  <span className="mr-2">{it.label}</span>
-                  <span className={active ? "text-white/90" : "text-gray-700"}>{it.count}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-2 text-[12px] text-gray-600">Clique un état puis “Signaler”.</div>
-
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={!selectedLevel}
-            className={[
-              "mt-3 w-full rounded-xl py-2.5 font-extrabold text-white transition",
-              submitButtonStyle(selectedLevel),
-            ].join(" ")}
-          >
-            Signaler
-          </button>
-        </div>
-      </AccordionContent>
-    </AccordionItem>
-  );
-}
-
-export default function BeachScreen({ reports, addReports }) {
-  const { beachId } = useParams();
-  const beachIdNum = Number(beachId);
-  const beach = beaches.find((b) => b.id === beachIdNum);
-
-  // ✅ IMPORTANT : valeur contrôlée TOUJOURS string
-  // "" = rien d'ouvert (sinon Radix fait parfois un “double clic”)
-  const [openItem, setOpenItem] = React.useState("");
-
-  const [picked, setPicked] = React.useState({
-    sargasses: 0,
-    swim: 0,
-    sun: 0,
-    crowd: 0,
-  });
-
-  if (!beach || !Number.isFinite(beachIdNum)) {
     return (
-      <Layout>
-        <p className="text-sm">Plage introuvable.</p>
-        <Link to="/" className="text-sm text-gray-600">
-          ← Retour
-        </Link>
-      </Layout>
+        <AccordionItem value={value} className="border-b border-gray-50 last:border-none">
+            <AccordionTrigger className="px-3 py-3 hover:no-underline transition-all">
+                <div className="flex items-center gap-3 w-full text-left">
+                    <div className="relative shrink-0">
+                        <img src={iconForState(kind, level)} alt="" className="w-10 h-10 object-contain" />
+                        <div className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${level === 1 ? 'bg-green-500' : level === 2 ? 'bg-orange-500' : level === 3 ? 'bg-red-500' : 'bg-gray-300'}`} />
+                    </div>
+                    <div className="flex flex-col flex-1">
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">{title}</span>
+                        <span className="text-[14px] font-black text-slate-800 leading-tight">{decisionText(kind, level)}</span>
+                    </div>
+                    <span className="text-xs mr-2 opacity-40">📊</span>
+                </div>
+            </AccordionTrigger>
+
+            <AccordionContent className="px-3 pb-4 pt-1 bg-slate-50/30">
+                <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-1.5">
+                        {[1, 2, 3].map((lvl) => (
+                            <button
+                                key={lvl}
+                                type="button"
+                                onClick={() => onPick(lvl)}
+                                className={`py-2 rounded-xl border transition-all font-black text-[11px] ${selectedLevel === lvl ? "bg-slate-800 border-slate-800 text-white shadow-md" : "bg-white border-gray-100 text-gray-500"
+                                    }`}
+                            >
+                                {labels[lvl - 1]}
+                            </button>
+                        ))}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={onSubmit}
+                        disabled={!selectedLevel}
+                        className={`w-full py-3 rounded-xl font-black text-white text-xs transition-all ${selectedLevel ? (selectedLevel === 1 ? 'bg-green-600' : selectedLevel === 2 ? 'bg-orange-500' : selectedLevel === 3 ? 'bg-red-600' : 'bg-gray-400') : "bg-gray-200 text-gray-400"
+                            }`}
+                    >
+                        CONFIRMER
+                    </button>
+                </div>
+            </AccordionContent>
+        </AccordionItem>
     );
-  }
+}
 
-  const beachReports = reports.filter((r) => r.beachId === beach.id);
+export default function BeachScreen({ reports = [], addReports, userPosition }) {
+    const { beachId } = useParams();
+    const beach = beaches.find(b => b.id === Number(beachId));
+    const [openItem, setOpenItem] = useState("");
+    const [picked, setPicked] = useState({ sargasses: 0, swim: 0, sun: 0, crowd: 0 });
 
-  // décisions (3h)
-  const sargDecision = computeDecision(beachReports, "sargasses", WINDOW_MS);
-  const swimDecision = computeDecision(beachReports, "swim", WINDOW_MS);
-  const sunDecision = computeDecision(beachReports, "sun", WINDOW_MS);
-  const crowdDecision = computeDecision(beachReports, "crowd", WINDOW_MS);
+    if (!beach) return <Layout><div className="p-10 text-center font-bold">Plage introuvable</div></Layout>;
 
-  // compteurs (24h)
-  const sarg24 = get24hCountsForType(reports, beach.id, "sargasses");
-  const swim24 = get24hCountsForType(reports, beach.id, "swim");
-  const sun24 = get24hCountsForType(reports, beach.id, "sun");
-  const crowd24 = get24hCountsForType(reports, beach.id, "crowd");
+    // --- GESTION IMAGES ---
+    const logoPath = `/${beach.id}.png`;
+    const photoPath = `/${beach.id}.jpg`;
 
-  function submit(kind) {
-    const level = picked[kind];
-    if (!level) return;
+    const handleAction = (kind) => {
+        const now = Date.now();
+        const isAdmin = userPosition?.lat && userPosition.lat > 40;
+        const lockKey = `lock_${beach.id}_${kind}`;
+        const lastReport = localStorage.getItem(lockKey);
 
-    if (typeof addReports !== "function") {
-      alert("addReports manquant (voir patch App.jsx).");
-      return;
-    }
+        if (!isAdmin && lastReport && now - Number(lastReport) < 2 * 60 * 60 * 1000) {
+            alert("Déjà signalé ! Un seul vote par catégorie toutes les 2h.");
+            return;
+        }
 
-    const type =
-      kind === "sargasses"
-        ? "sargasses"
-        : kind === "swim"
-        ? "swim"
-        : kind === "sun"
-        ? "sun"
-        : "crowd";
+        if (typeof addReports === "function") {
+            addReports([{ beachId: beach.id, type: kind, level: picked[kind], ts: now }]);
+            if (!isAdmin) localStorage.setItem(lockKey, now.toString());
+            setPicked(p => ({ ...p, [kind]: 0 }));
+            setOpenItem("");
+            // Suppression du remerciement pour fluidité
+        }
+    };
 
-    addReports([{ beachId: beach.id, type, level, ts: Date.now() }]);
-    setPicked((p) => ({ ...p, [kind]: 0 }));
-  }
+    return (
+        <Layout>
+            {/* --- HEADER PRINCIPAL --- */}
+            <div className="bg-white rounded-[24px] shadow-sm border border-gray-100 p-4 mb-3 mt-2">
+                <div className="flex items-center gap-4">
+                    {/* Logo agrandi de 20% (w-17 au lieu de w-14) */}
+                    <img
+                        src={logoPath}
+                        alt={beach.name}
+                        className="w-17 h-17 rounded-[20px] object-cover bg-slate-50 shadow-inner"
+                        onError={(e) => { e.target.onerror = null; e.target.src = "/logoplage.png"; }}
+                    />
 
-  return (
-    <Layout>
-      {/* Header plage */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-3">
-        <div className="flex items-center gap-3">
-          <img
-            src="/logoplage.png"
-            alt=""
-            aria-hidden="true"
-            className="w-14 h-14 rounded-full object-cover border border-gray-200 flex-shrink-0"
-          />
-          <div className="min-w-0">
-            <div className="text-[16px] font-extrabold leading-tight">{beach.name}</div>
-            <div className="text-[12px] text-gray-600">
-              {beach.town} • {beach.island}
+                    <div className="flex-1 text-left">
+                        <div className="flex items-center justify-between">
+                            <h1 className="text-lg font-black text-slate-800 leading-none italic uppercase tracking-tighter">
+                                {beach.name}
+                            </h1>
+
+                            <Dialog>
+                                <DialogTrigger asChild>
+                                    <button className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-transform">
+                                        <span className="text-xs font-black text-slate-400 italic">i</span>
+                                    </button>
+                                </DialogTrigger>
+                                <DialogContent className="w-[92vw] max-w-[380px] rounded-[35px] border-none shadow-2xl p-0 bg-white overflow-hidden">
+                                    {/* Photo JPG en haut du pop-up */}
+                                    <img
+                                        src={photoPath}
+                                        alt={beach.name}
+                                        className="w-full h-40 object-cover shadow-md"
+                                        onError={(e) => { e.target.onerror = null; e.target.src = "/logoplage.png"; }}
+                                    />
+
+                                    <div className="p-6">
+                                        <DialogHeader>
+                                            <DialogTitle className="text-xl font-black italic uppercase text-slate-800 text-center mb-1">
+                                                {beach.name}
+                                            </DialogTitle>
+                                            <div className="text-center text-[10px] text-slate-400 font-bold uppercase mb-4 tracking-widest">
+                                                {beach.town} • {beach.island}
+                                            </div>
+                                        </DialogHeader>
+
+                                        <div className="flex gap-2 justify-center mb-5">
+                                            <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
+                                                <span className="text-base">🚗</span>
+                                                <span className="text-[11px] font-black text-slate-700">{beach.parking || "Non"}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
+                                                <span className="text-base">🚿</span>
+                                                <span className="text-[11px] font-black text-slate-700">{beach.douche || "Non"}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="text-sm text-slate-600 leading-relaxed text-center font-medium mb-6 px-2">
+                                            Cette plage est réputée pour son sable fin et ses eaux cristallines. {beach.name} offre un cadre idéal pour la détente. La qualité des eaux est régulièrement contrôlée pour votre sécurité.
+                                        </div>
+
+                                        <div className="pt-2 border-t border-slate-100 text-center">
+                                            <div className="text-[9px] font-bold text-slate-300 uppercase tracking-widest mb-2">Partenaire Local</div>
+                                            <img
+                                                src="/pub_hamac.png"
+                                                alt="Promo Hamac"
+                                                className="w-full h-20 object-cover rounded-2xl shadow-inner opacity-90"
+                                            />
+                                        </div>
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+
+                        <p className="text-slate-400 font-bold text-[10px] uppercase">{beach.town}</p>
+
+                        <div className="flex gap-2 mt-2.5">
+                            <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
+                                <span className="text-lg">🚗</span>
+                                <span className="text-[11px] font-black text-slate-700">{beach.parking || "Non"}</span>
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
+                                <span className="text-lg">🚿</span>
+                                <span className="text-[11px] font-black text-slate-700">{beach.douche || "Non"}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div className="mt-1 text-[12px] text-gray-700 flex flex-wrap gap-x-3 gap-y-1">
-              <span>
-                🚗 Parking : <span className="font-semibold">{beach.parking ?? "—"}</span>
-              </span>
-              <span>
-                🚿 Douche : <span className="font-semibold">{beach.douche ?? "—"}</span>
-              </span>
+
+            {/* --- ACCORDÉONS --- */}
+            <div className="bg-white rounded-[24px] shadow-sm border border-gray-100 overflow-hidden">
+                <Accordion type="single" collapsible value={openItem} onValueChange={setOpenItem}>
+                    {["sargasses", "swim", "sun", "crowd"].map((kind) => (
+                        <EventItem
+                            key={kind}
+                            value={kind}
+                            title={kind === "sun" ? "Météo" : kind === "swim" ? "Baignade" : kind === "crowd" ? "Monde" : kind}
+                            kind={kind}
+                            decision={computeDecision(reports.filter(r => r.beachId === beach.id), kind, WINDOW_MS)}
+                            selectedLevel={picked[kind]}
+                            onPick={(lvl) => setPicked(p => ({ ...p, [kind]: p[kind] === lvl ? 0 : lvl }))}
+                            onSubmit={() => handleAction(kind)}
+                        />
+                    ))}
+                </Accordion>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Accordéon compact (pas d’espace entre blocs) */}
-      <div className="mt-3 rounded-2xl overflow-hidden border border-gray-200">
-        <Accordion
-          type="single"
-          collapsible
-          value={openItem}
-          onValueChange={setOpenItem}
-          className="bg-white"
-        >
-          <EventItem
-            value="sargasses"
-            title="Sargasses"
-            kind="sargasses"
-            decision={sargDecision}
-            counts24h={sarg24}
-            selectedLevel={picked.sargasses}
-            onPick={(lvl) =>
-              setPicked((p) => ({ ...p, sargasses: p.sargasses === lvl ? 0 : lvl }))
-            }
-            onSubmit={() => submit("sargasses")}
-          />
+            <Link
+                to={`/beach/${beach.id}/report`}
+                className="mt-4 flex items-center justify-center w-full py-4 rounded-[20px] bg-[#1f7c8a] text-white font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+            >
+                Signaler un problème
+            </Link>
 
-          <EventItem
-            value="swim"
-            title="Baignade"
-            kind="swim"
-            decision={swimDecision}
-            counts24h={swim24}
-            selectedLevel={picked.swim}
-            onPick={(lvl) =>
-              setPicked((p) => ({ ...p, swim: p.swim === lvl ? 0 : lvl }))
-            }
-            onSubmit={() => submit("swim")}
-          />
-
-          <EventItem
-            value="sun"
-            title="Soleil"
-            kind="sun"
-            decision={sunDecision}
-            counts24h={sun24}
-            selectedLevel={picked.sun}
-            onPick={(lvl) =>
-              setPicked((p) => ({ ...p, sun: p.sun === lvl ? 0 : lvl }))
-            }
-            onSubmit={() => submit("sun")}
-          />
-
-          <EventItem
-            value="crowd"
-            title="Affluence"
-            kind="crowd"
-            decision={crowdDecision}
-            counts24h={crowd24}
-            selectedLevel={picked.crowd}
-            onPick={(lvl) =>
-              setPicked((p) => ({ ...p, crowd: p.crowd === lvl ? 0 : lvl }))
-            }
-            onSubmit={() => submit("crowd")}
-          />
-        </Accordion>
-      </div>
-
-      {/* Bouton report global */}
-      <Link
-        to={`/beach/${beach.id}/report`}
-        className="mt-4 block w-full text-center rounded-xl py-3 font-extrabold text-white bg-red-600 hover:bg-red-700 transition"
-      >
-        Signaler
-      </Link>
-
-  {/* Pub bannière compacte */}
-<div className="mt-3 flex justify-center">
-  <img
-    src="/pub_hamac.png"
-    alt="Publicité"
-    className="w-full max-w-md h-20 object-cover rounded-lg"
-  />
-</div>
-
-
-      <div className="mt-4">
-        <Link to="/" className="text-sm text-gray-600">
-          ← Retour à la carte
-        </Link>
-      </div>
-    </Layout>
-  );
+            <div className="mt-4">
+                <img src="/pub_hamac.png" alt="Pub" className="w-full h-16 object-cover rounded-[18px] opacity-90 shadow-inner" />
+            </div>
+        </Layout>
+    );
 }
