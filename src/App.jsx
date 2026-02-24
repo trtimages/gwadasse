@@ -1,67 +1,91 @@
 // App.jsx
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { beaches } from "./data/beaches.js";
-import { mockReports } from "./data/mockReports.js";
 import MapScreen from "./screens/MapScreen.jsx";
 import BeachScreen from "./screens/BeachScreen.jsx";
 import ReportScreen from "./screens/ReportScreen.jsx";
 
+// IMPORTS FIREBASE
+import { db } from "./firebase";
+import { collection, addDoc, onSnapshot, query, orderBy, where } from "firebase/firestore";
+
 import { normalizeReports } from "./utils/reports.js";
 
-/* ============================================================
-   Composant Principal : App
-   Gère le GPS, l'état des rapports et la navigation
-   ============================================================ */
 export default function App() {
-    const [userPosition, setUserPosition] = React.useState(null); // {lat, lng, accuracy}
-    const [gpsError, setGpsError] = React.useState(null);
+    const [userPosition, setUserPosition] = useState(null);
+    const [gpsError, setGpsError] = useState(null);
+    const [reports, setReports] = useState([]); 
 
-    // --- LOGIQUE GPS ---
-    React.useEffect(() => {
+    // --- 1. LOGIQUE GPS (Suivi en temps réel) ---
+    useEffect(() => {
         if (!navigator.geolocation) {
             setGpsError("GPS non supporté");
             return;
         }
 
-        navigator.geolocation.getCurrentPosition(
+        // watchPosition suit l'utilisateur en continu
+        const watchId = navigator.geolocation.watchPosition(
             (pos) => {
                 setUserPosition({
                     lat: pos.coords.latitude,
                     lng: pos.coords.longitude,
                     accuracy: pos.coords.accuracy,
                 });
+                setGpsError(null);
             },
             (err) => {
                 setGpsError(err?.message || "GPS refusé");
             },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+            { 
+                enableHighAccuracy: true, // Utilise la puce GPS du téléphone
+                timeout: 15000, 
+                maximumAge: 0 // On veut la position la plus fraîche possible
+            }
         );
+
+        // Nettoyage de l'écouteur GPS quand on quitte l'appli
+        return () => navigator.geolocation.clearWatch(watchId);
     }, []);
 
-    // --- LOGIQUE RAPPORTS (LocalStorage) ---
-    const [reports, setReports] = React.useState(() => {
-        const saved = localStorage.getItem("gwada_reports_v1");
-        const fallback = mockReports;
+    // --- 2. LOGIQUE FIREBASE (Lecture 24h en temps réel) ---
+    useEffect(() => {
+        const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
 
-        if (saved) {
-            try {
-                return normalizeReports(JSON.parse(saved));
-            } catch {
-                return normalizeReports(fallback);
+        const q = query(
+            collection(db, "reports"),
+            where("ts", ">", twentyFourHoursAgo),
+            orderBy("ts", "desc")
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const firebaseReports = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            
+            setReports(normalizeReports(firebaseReports));
+        }, (error) => {
+            console.error("Erreur d'écoute Firebase:", error);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    // --- 3. FONCTION D'AJOUT (Écriture Firebase) ---
+    const addReports = async (newReports) => {
+        try {
+            for (const report of newReports) {
+                await addDoc(collection(db, "reports"), {
+                    ...report,
+                    ts: Date.now(),
+                    serverDate: new Date().toISOString()
+                });
             }
+        } catch (e) {
+            console.error("Erreur Firebase:", e);
+            alert("Erreur de connexion à la base de données.");
         }
-        return normalizeReports(fallback);
-    });
-
-    React.useEffect(() => {
-        localStorage.setItem("gwada_reports_v1", JSON.stringify(reports));
-    }, [reports]);
-
-    // Fonction pour ajouter un nouveau signalement
-    function addReports(newReports) {
-        setReports((prev) => [...prev, ...newReports]);
-    }
+    };
 
     return (
         <BrowserRouter>
@@ -72,7 +96,7 @@ export default function App() {
                     element={<MapScreen userPosition={userPosition} gpsError={gpsError} reports={reports} />}
                 />
 
-                {/* Écran Détail Plage (CORRIGÉ : Ajout de userPosition) */}
+                {/* Écran Détail Plage */}
                 <Route
                     path="/beach/:beachId"
                     element={

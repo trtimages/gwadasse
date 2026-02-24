@@ -16,12 +16,12 @@ function getVoteCount(allReports, beachId, type, level) {
 
 function MiniGrid({ title, options, current, onChange, reports, beachId, kind }) {
     return (
-        <div className="mb-2">
-            <div className="text-[8px] font-black text-slate-400 uppercase tracking-wider mb-1 ml-1 flex justify-between">
-                <span>{title}</span>
-                <span className="opacity-50 italic">Dernières 24h</span>
+        <div className="mb-4">
+            <div className="flex justify-between items-end mb-2 px-1">
+                <span className="text-[11px] font-black text-slate-800 uppercase tracking-tight">{title}</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-1.5 py-0.5 rounded-md">24H</span>
             </div>
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-3 gap-2">
                 {options.map((opt) => {
                     const active = current === opt.lvl;
                     const votes = getVoteCount(reports, beachId, kind, opt.lvl);
@@ -31,16 +31,17 @@ function MiniGrid({ title, options, current, onChange, reports, beachId, kind })
                             key={opt.lvl}
                             type="button"
                             onClick={() => onChange(active ? 0 : opt.lvl)}
-                            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-lg border transition-all ${active
-                                    ? "bg-slate-800 border-slate-800 text-white shadow-sm"
-                                    : "bg-white border-gray-100 text-slate-500"
-                                }`}
+                            className={`relative flex flex-col items-center justify-center py-2.5 px-1.5 rounded-xl border-2 transition-all active:scale-95 ${
+                                active
+                                    ? "bg-slate-800 border-slate-800 text-white shadow-md scale-105"
+                                    : "bg-white border-slate-100 text-slate-500 shadow-sm hover:bg-slate-50"
+                            }`}
                         >
-                            <span className="text-sm">{opt.icon}</span>
-                            <div className="flex items-center gap-1">
-                                <span className="text-[7px] font-black uppercase truncate">{opt.label}</span>
+                            <span className="text-2xl mb-1.5 drop-shadow-sm">{opt.icon}</span>
+                            <div className="flex flex-col items-center gap-0.5">
+                                <span className="text-[9px] font-black uppercase tracking-wide leading-none">{opt.label}</span>
                                 <span className={`text-[8px] font-bold ${active ? "text-cyan-300" : "text-slate-400"}`}>
-                                    {votes}
+                                    {votes} avis
                                 </span>
                             </div>
                         </button>
@@ -62,7 +63,7 @@ export default function ReportScreen({ reports = [], addReports, userPosition })
     const [swim, setSwim] = useState(0);
     const [crowd, setCrowd] = useState(0);
 
-    if (!beach) return <Layout>Plage inconnue</Layout>;
+    if (!beach) return <Layout><div className="p-10 text-center font-bold">Plage inconnue</div></Layout>;
 
     const submit = () => {
         if (!(sargasses || sun || swim || crowd)) return;
@@ -79,18 +80,18 @@ export default function ReportScreen({ reports = [], addReports, userPosition })
 
     return (
         <Layout>
-            {/* Header ultra-compact */}
-            <div className="flex items-center justify-between mb-2">
-                <Link to={`/beach/${beachIdNum}`} className="flex items-center text-slate-400 font-black text-[8px] uppercase tracking-tighter">
-                    <ChevronLeft size={10} /> Annuler
+            {/* Header intermédiaire */}
+            <div className="flex items-center justify-between mb-4 mt-1">
+                <Link to={`/beach/${beachIdNum}`} className="flex items-center text-slate-500 font-black text-[10px] uppercase tracking-tighter active:scale-95 transition-transform p-2 -ml-2">
+                    <ChevronLeft size={14} /> Retour
                 </Link>
-                <div className="text-[8px] font-black text-slate-400 uppercase italic flex items-center gap-1">
-                    <MapPin size={8} className={userPosition ? "text-green-500" : ""} />
+                <div className="text-[10px] font-black text-[#1f7c8a] uppercase italic flex items-center gap-1.5 bg-[#1f7c8a]/10 px-2.5 py-1 rounded-full">
+                    <MapPin size={10} className={userPosition ? "text-green-500" : "text-[#1f7c8a]"} />
                     {beach.name}
                 </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1 pb-4">
                 <MiniGrid title="Sargasses" kind="sargasses" reports={reports} beachId={beachIdNum} current={sargasses} onChange={setSargasses}
                     options={[{ lvl: 1, label: "Tranquille", icon: "🟢" }, { lvl: 2, label: "Moyen", icon: "🟠" }, { lvl: 3, label: "Envahi", icon: "🔴" }]} />
 
@@ -107,11 +108,17 @@ export default function ReportScreen({ reports = [], addReports, userPosition })
             <button
                 onClick={submit}
                 disabled={!(sargasses || sun || swim || crowd)}
-                className={`mt-4 w-full py-2.5 rounded-lg font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-md transition-all ${(sargasses || sun || swim || crowd) ? "bg-[#1f7c8a] text-white" : "bg-gray-100 text-gray-400"
-                    }`}
+                className={`mt-1 mb-4 w-full py-3.5 rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 ${
+                    (sargasses || sun || swim || crowd) ? "bg-[#1f7c8a] text-white" : "bg-gray-100 text-gray-400 shadow-none"
+                }`}
             >
-                <Send size={10} /> Envoyer
+                <Send size={14} /> Envoyer
             </button>
+
+            {/* --- PUB CLIQUABLE --- */}
+            <a href="https://le-hamac.com/" target="_blank" rel="noopener noreferrer" className="block active:scale-95 transition-transform mb-4">
+                <img src="/pub_hamac.png" alt="Pub Le Hamac" className="w-full h-16 object-cover rounded-[18px] opacity-90 shadow-inner" />
+            </a>
         </Layout>
     );
 }

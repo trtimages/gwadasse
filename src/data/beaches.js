@@ -42,7 +42,7 @@ export const beaches = [
     { id: 30, slug: "pompierre", name: "Plage de Pompierre", town: "Terre-de-Haut", island: "Les Saintes", lat: 15.8709, lng: -61.5856, radius: BEACH_RADIUS, map: { x: 35.67, y: 82.95 }, parking: "Oui", douche: "Oui" },
     { id: 31, slug: "pain-de-sucre", name: "Plage du Pain de Sucre", town: "Terre-de-Haut", island: "Les Saintes", lat: 15.8726, lng: -61.5791, radius: BEACH_RADIUS, map: { x: 34.19, y: 83.12 }, parking: "Oui (petit)", douche: "Non" },
     { id: 32, slug: "petite-anse-terre-de-bas", name: "Plage de Petite Anse", town: "Terre-de-Bas", island: "Les Saintes", lat: 15.8469, lng: -61.6212, radius: BEACH_RADIUS, map: { x: 29.33, y: 85.64 }, parking: "Oui", douche: "Non" },
-    { id: 33, slug: "anse-a-dos", name: "Plage de l’Anse à Dos", town: "Terre-de-Bas", island: "Les Saintes", lat: 15.8447, lng: -61.6174, radius: BEACH_RADIUS, map: { x: 64.76, y: 69.92 }, parking: "Oui", douche: "Non" },
+    { id: 33, slug: "anse-a-dos", name: "Plage de l’Anse à Dos", town: "Terre-de-Bas", island: "Les Saintes", lat: 15.8447, lng: -61.6174, radius: BEACH_RADIUS, map: { x: 29.00, y: 84.07 }, parking: "Oui", douche: "Non" },
 
   // Marie-Galante
     { id: 34, slug: "anse-feuillard", name: "Plage de l’Anse Feuillard", town: "Grand-Bourg", island: "Marie-Galante", lat: 15.8846, lng: -61.2893, radius: BEACH_RADIUS, map: { x: 73.45, y: 78.34 }, parking: "Oui", douche: "Non" },
