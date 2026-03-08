@@ -7,23 +7,26 @@ import ReportScreen from "./screens/ReportScreen.jsx";
 
 // IMPORTS FIREBASE
 import { db } from "./firebase";
-import { collection, addDoc, onSnapshot, query, orderBy, where } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, query, where } from "firebase/firestore";
 
 import { normalizeReports } from "./utils/reports.js";
+
+// IMPORT TRADUCTION
+import { LanguageProvider } from "./i18n/LanguageContext";
 
 export default function App() {
     const [userPosition, setUserPosition] = useState(null);
     const [gpsError, setGpsError] = useState(null);
     const [reports, setReports] = useState([]); 
 
-    // --- 1. LOGIQUE GPS (Suivi en temps réel) ---
+    // --- 1. LOGIQUE GPS (Le retour du temps réel fluide !) ---
     useEffect(() => {
         if (!navigator.geolocation) {
             setGpsError("GPS non supporté");
             return;
         }
 
-        // watchPosition suit l'utilisateur en continu
+        // watchPosition suit l'utilisateur intelligemment
         const watchId = navigator.geolocation.watchPosition(
             (pos) => {
                 setUserPosition({
@@ -37,24 +40,22 @@ export default function App() {
                 setGpsError(err?.message || "GPS refusé");
             },
             { 
-                enableHighAccuracy: true, // Utilise la puce GPS du téléphone
+                enableHighAccuracy: true,
                 timeout: 15000, 
-                maximumAge: 0 // On veut la position la plus fraîche possible
+                maximumAge: 0 
             }
         );
 
-        // Nettoyage de l'écouteur GPS quand on quitte l'appli
         return () => navigator.geolocation.clearWatch(watchId);
     }, []);
 
-    // --- 2. LOGIQUE FIREBASE (Lecture 24h en temps réel) ---
+    // --- 2. LOGIQUE FIREBASE (Lecture 24h optimisée et sécurisée financièrement) ---
     useEffect(() => {
         const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
 
         const q = query(
             collection(db, "reports"),
-            where("ts", ">", twentyFourHoursAgo),
-            orderBy("ts", "desc")
+            where("ts", ">", twentyFourHoursAgo)
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -63,7 +64,10 @@ export default function App() {
                 ...doc.data()
             }));
             
-            setReports(normalizeReports(firebaseReports));
+            // Tri local en JS pour éviter les erreurs d'Index Firebase
+            const sortedReports = firebaseReports.sort((a, b) => b.ts - a.ts);
+            
+            setReports(normalizeReports(sortedReports));
         }, (error) => {
             console.error("Erreur d'écoute Firebase:", error);
         });
@@ -88,38 +92,37 @@ export default function App() {
     };
 
     return (
-        <BrowserRouter>
-            <Routes>
-                {/* Écran Carte */}
-                <Route
-                    path="/"
-                    element={<MapScreen userPosition={userPosition} gpsError={gpsError} reports={reports} />}
-                />
+        <LanguageProvider>
+            <BrowserRouter>
+                <Routes>
+                    <Route
+                        path="/"
+                        element={<MapScreen userPosition={userPosition} gpsError={gpsError} reports={reports} />}
+                    />
 
-                {/* Écran Détail Plage */}
-                <Route
-                    path="/beach/:beachId"
-                    element={
-                        <BeachScreen
-                            reports={reports}
-                            addReports={addReports}
-                            userPosition={userPosition}
-                        />
-                    }
-                />
+                    <Route
+                        path="/beach/:beachId"
+                        element={
+                            <BeachScreen
+                                reports={reports}
+                                addReports={addReports}
+                                userPosition={userPosition}
+                            />
+                        }
+                    />
 
-                {/* Écran Formulaire de signalement */}
-                <Route
-                    path="/beach/:beachId/report"
-                    element={
-                        <ReportScreen
-                            addReports={addReports}
-                            userPosition={userPosition}
-                            gpsError={gpsError}
-                        />
-                    }
-                />
-            </Routes>
-        </BrowserRouter>
+                    <Route
+                        path="/beach/:beachId/report"
+                        element={
+                            <ReportScreen
+                                addReports={addReports}
+                                userPosition={userPosition}
+                                gpsError={gpsError}
+                            />
+                        }
+                    />
+                </Routes>
+            </BrowserRouter>
+        </LanguageProvider>
     );
 }
