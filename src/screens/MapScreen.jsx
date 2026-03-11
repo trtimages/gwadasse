@@ -1,23 +1,18 @@
-// src/screens/MapScreen.jsx
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { beaches } from "../data/beaches.js";
 import { markerColorForBeach } from "../utils/reports.js";
-import { Search, User, LocateFixed, Navigation, Star, MapPin } from "lucide-react";
+import { Search, User, LocateFixed, Star, MapPin, Plus, ChevronDown } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 // --- IMPORT DU CERVEAU DE TRADUCTION ---
 import { useLanguage } from "../i18n/LanguageContext";
 
-// --- MÉMOIRE GLOBALE ---
-let globalGPSMemory = {
-    isFocused: false,
-    hasInitialized: false
-};
-
-// --- LIMITES DE LA CARTE & GÉOMÉTRIE ---
+// --- MÉMOIRE GLOBALE & GÉOMÉTRIE ---
+let globalGPSMemory = { isFocused: false, hasInitialized: false, hasDoneVisualCenter: false };
 const mapBounds = { north: 16.55, south: 15.80, west: -61.85, east: -61.00 };
 
 function gpsToMap(lat, lng) {
@@ -40,7 +35,6 @@ function calcDistanceKm(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// On passe 't' à la fonction pour traduire "Sur place"
 function formatDist(km, t) {
     if (km < 1) {
         const m = Math.round((km * 1000) / 100) * 100;
@@ -53,17 +47,24 @@ function isPointInGuadeloupe(lat, lng) {
     return lat <= mapBounds.north && lat >= mapBounds.south && lng >= mapBounds.west && lng <= mapBounds.east;
 }
 
-function cleanBeachName(name) {
-    if (!name) return "";
-    let cleaned = name.replace(/^plage (de la |de l'|des |du |d'|de )?|^des /i, "").trim();
+function cleanBeachName(nameData) {
+    const textName = (nameData && typeof nameData === 'object' && nameData.fr) ? nameData.fr : (typeof nameData === 'string' ? nameData : "");
+    if (!textName) return "";
+    let cleaned = textName.replace(/^plage (de la |de l'|des |du |d'|de )?|^des /i, "").trim();
     if (/^caravelle/i.test(cleaned)) return "La Caravelle";
     if (/^perle/i.test(cleaned)) return "La Perle";
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
+function getLocalizedText(dataObj, lang) {
+    if (!dataObj) return "";
+    if (typeof dataObj === 'string') return dataObj;
+    return (lang === 'cr' && dataObj.cr) ? dataObj.cr : (dataObj.fr || "");
+}
+
 export default function MapScreen({ userPosition, gpsError, reports }) {
-    // --- ON RÉCUPÈRE LA LANGUE ET LA FONCTION DE TRADUCTION ---
-    const { language, setLanguage, t } = useLanguage();
+    const langContext = useLanguage();
+    const { language = 'fr', setLanguage = () => {}, t = (k) => k } = langContext || {};
 
     const navigate = useNavigate();
     const transformRef = useRef(null);
@@ -74,7 +75,26 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     const [tempCoords, setTempCoords] = useState(null);
     const [isLoginOpen, setIsLoginOpen] = useState(false);
     
+    const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+    
+    // Nouvel état pour contrôler l'ouverture de la liste des plages
+    const [isSheetOpen, setIsSheetOpen] = useState(false);
+    
     const [isFocusedOnUser, setIsFocusedOnUser] = useState(globalGPSMemory.isFocused);
+
+    // --- ÉTAT DE LA VIGILANCE ---
+    const [vigilanceAlert, setVigilanceAlert] = useState("⚠️ Vigilance orange en cours - Soyez prudents ⚠️");
+
+    useEffect(() => {
+        const fetchVigilance = async () => {
+            try {
+                // Remplacer l'URL ci-dessous par l'URL Météo-France API quand tu l'auras
+            } catch (error) {
+                console.error("Erreur API Vigilance:", error);
+            }
+        };
+        fetchVigilance();
+    }, []);
 
     const isUserInGwada = userPosition && isPointInGuadeloupe(userPosition.lat, userPosition.lng);
 
@@ -86,7 +106,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     if (!globalGPSMemory.hasInitialized) {
                         transformRef.current.zoomToElement("user-halo", 3, 1000);
                         setIsFocusedOnUser(true);
-                        globalGPSMemory.isFocused = true;
                         globalGPSMemory.hasInitialized = true;
                     } else if (globalGPSMemory.isFocused) {
                         transformRef.current.zoomToElement("user-halo", 3, 0);
@@ -97,12 +116,33 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
         }
     }, [isUserInGwada]);
 
+    useEffect(() => {
+        if (globalGPSMemory.hasInitialized || globalGPSMemory.hasDoneVisualCenter) return;
+
+        if (transformRef.current) {
+            const timer = setTimeout(() => {
+                transformRef.current.centerView(1, 0);
+                const { positionX } = transformRef.current.state;
+                const visualOffsetX = -15; 
+                transformRef.current.setTransform(positionX + visualOffsetX, 0, 1, 0);
+                globalGPSMemory.hasDoneVisualCenter = true;
+            }, 100); 
+            return () => clearTimeout(timer);
+        }
+    }, [transformRef]);
+
     const q = query.trim().toLowerCase();
     const displayedBeaches = useMemo(() => {
         let result = beaches;
 
         if (q) {
-            result = result.filter((b) => b.name.toLowerCase().includes(q) || b.town.toLowerCase().includes(q));
+            result = result.filter((b) => {
+                const frName = (b.name?.fr || b.name || "").toLowerCase();
+                const crName = (b.name?.cr || "").toLowerCase();
+                const frTown = (b.town?.fr || b.town || "").toLowerCase();
+                const crTown = (b.town?.cr || "").toLowerCase();
+                return frName.includes(q) || crName.includes(q) || frTown.includes(q) || crTown.includes(q);
+            });
         }
 
         if (isUserInGwada) {
@@ -114,11 +154,7 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
         }
 
         if (sortBy === 'popular') {
-            result = [...result].sort((a, b) => {
-                const popA = (a.id * 17) % 100;
-                const popB = (b.id * 17) % 100;
-                return popB - popA; 
-            });
+            result = [...result].sort((a, b) => ((b.id * 17) % 100) - ((a.id * 17) % 100));
         } else if (sortBy === 'distance' && isUserInGwada) {
             result = [...result].sort((a, b) => (a.dist || 0) - (b.dist || 0));
         }
@@ -126,24 +162,43 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
         return result;
     }, [q, sortBy, userPosition, isUserInGwada]);
 
-    const markers = useMemo(() => beaches.filter((b) => b.map), []);
-
     const toggleSort = (type) => {
         if (sortBy === type) setSortBy(null);
         else setSortBy(type);
     };
 
-    return (
-        <div className="fixed inset-0 h-[100dvh] w-full overflow-hidden bg-[#6bb0e0] font-sans">
+    const getFlagIcon = (lng) => {
+        if (lng === 'fr') return '🇫🇷';
+        if (lng === 'en') return '🇬🇧';
+        return <img src="/creole.png" alt="Créole" className="w-5 h-5 object-cover rounded-full shadow-sm" />;
+    };
 
-            {/* 1. CARTE (Z-INDEX 0) */}
+    return (
+        <div className="fixed inset-0 h-[100dvh] w-full overflow-hidden bg-[#0e3868] font-sans">
+            
+            <style>{`
+                @keyframes scrollMarquee {
+                    0% { transform: translateX(100%); }
+                    100% { transform: translateX(-100%); }
+                }
+                .animate-marquee {
+                    display: inline-block;
+                    animation: scrollMarquee 15s linear infinite;
+                    white-space: nowrap;
+                }
+                .font-techno {
+                    font-family: 'Courier New', Courier, monospace;
+                    font-weight: 300;
+                }
+            `}</style>
+
             <div className="absolute inset-0 z-0 h-full w-full">
                 <TransformWrapper
                     ref={transformRef}
                     initialScale={1}
                     minScale={0.4}
                     maxScale={12}
-                    centerOnInit={true}
+                    centerOnInit={false} 
                     limitToBounds={false}
                     onTransformed={(ref) => setScale(ref.state.scale)}
                     onPanningStop={() => {
@@ -154,7 +209,7 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     }}
                 >
                     <TransformComponent wrapperStyle={{ width: "100vw", height: "100dvh" }}>
-                        <div id="svg-map" className="relative flex shrink-0" onClick={(e) => {
+                        <div id="svg-map" className="relative shrink-0 inline-block" onClick={(e) => {
                             if (calibMode) {
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -179,193 +234,225 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                                     </div>
                                 )}
 
-                                {!calibMode && markers.map((b) => (
-                                    <div key={b.id} style={{
-                                        position: "absolute",
-                                        left: `${b.map.x}%`,
-                                        top: `${b.map.y}%`,
-                                        transform: `translate(-50%, -50%) scale(${1 / scale})`,
-                                        zIndex: 20
-                                    }} className="flex flex-col items-center">
-                                        <button onClick={(e) => { e.stopPropagation(); navigate(`/beach/${b.id}`); }}
-                                            className="pointer-events-auto shadow-md shrink-0 w-3 h-3 rounded-full border border-white"
-                                            style={{ backgroundColor: markerColorForBeach(reports, b.id) }} />
-                                        <span className="mt-1 font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,1)] whitespace-nowrap italic uppercase text-[8px] leading-none text-center">
-                                            {cleanBeachName(b.name)}
-                                        </span>
-                                    </div>
-                                ))}
+                                {!calibMode && beaches.filter(b => b.map).map((b) => {
+                                    let showName = false;
+                                    if (scale >= 2.8) {
+                                        showName = true;
+                                    } else if (scale >= 1.8) {
+                                        showName = b.priority <= 2;
+                                    } else {
+                                        showName = b.priority === 1;
+                                    }
+
+                                    const hasRecentReports = reports.some(r => r.beachId === b.id && (Date.now() - r.ts) <= 3 * 60 * 60 * 1000);
+                                    const dotColor = hasRecentReports ? markerColorForBeach(reports, b.id) : "#facc15";
+
+                                    return (
+                                        <div key={b.id} style={{
+                                            position: "absolute",
+                                            left: `${b.map.x}%`,
+                                            top: `${b.map.y}%`,
+                                            transform: `translate(-50%, -50%) scale(${1 / scale})`,
+                                            zIndex: 20
+                                        }} className="flex flex-col items-center">
+                                            
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); navigate(`/beach/${b.id}`); }}
+                                                className="pointer-events-auto shadow-sm shrink-0 w-1.5 h-1.5 rounded-full border-[1px] border-black transition-transform active:scale-150"
+                                                style={{ backgroundColor: dotColor }} 
+                                            />
+                                            
+                                            <span 
+                                                className={`mt-1 font-black text-white whitespace-nowrap italic uppercase text-[8px] tracking-wider leading-none text-center transition-opacity duration-300 ${showName ? 'opacity-100' : 'opacity-0'}`}
+                                                style={{ 
+                                                    textShadow: '0px 1px 2px rgba(0,0,0,0.8), 0px -1px 2px rgba(0,0,0,0.8), 1px 0px 2px rgba(0,0,0,0.8), -1px 0px 2px rgba(0,0,0,0.8)'
+                                                }}
+                                            >
+                                                {cleanBeachName(b.name)}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </TransformComponent>
                 </TransformWrapper>
             </div>
 
-            {/* 2. HEADER : LOGO & BOUTONS OUTILS */}
-            <div className="absolute top-0 left-0 right-0 p-4 pt-6 z-[120] pointer-events-none flex justify-between items-start">
-                <img src="/logo_titre.png" alt="Logo" className="h-12 sm:h-16 w-auto object-contain pointer-events-auto drop-shadow-lg" />
+            <div className="absolute top-0 left-0 p-4 pt-6 z-[120] pointer-events-none">
+                <img src="/logo_titre.png" alt="Logo" className="h-14 w-auto object-contain drop-shadow-lg pointer-events-auto" />
+            </div>
 
-                <div className="flex flex-col items-end gap-3 pointer-events-auto">
-                    {/* BOUTONS OUTILS (GPS + Profil) */}
-                    <div className="flex items-center gap-2">
-                        <button 
-                            onClick={() => {
-                                if (!isUserInGwada) {
-                                    transformRef.current?.zoomToElement("svg-map", 1, 800);
-                                    setIsFocusedOnUser(false);
-                                    globalGPSMemory.isFocused = false;
-                                    return;
-                                }
-
-                                const element = document.getElementById("user-halo");
-                                if (isFocusedOnUser || !element) {
-                                    transformRef.current?.zoomToElement("svg-map", 1, 800);
-                                    setIsFocusedOnUser(false);
-                                    globalGPSMemory.isFocused = false;
-                                } else {
-                                    transformRef.current?.zoomToElement("user-halo", 3, 800);
-                                    setIsFocusedOnUser(true);
-                                    globalGPSMemory.isFocused = true;
-                                }
-                            }}
-                            className={`h-11 w-11 rounded-full shadow-2xl flex items-center justify-center active:scale-95 transition-all duration-200 border-2 ${
-                                isFocusedOnUser && isUserInGwada ? "bg-[#1f7c8a] text-white border-[#1f7c8a]" : "bg-white text-[#1f7c8a] border-white"
-                            }`}
+            <div className="absolute bottom-6 left-0 right-0 px-4 z-40 pointer-events-none flex flex-col items-center gap-3">
+                
+                {vigilanceAlert && (
+                    <div className="pointer-events-auto w-[85vw] max-w-[320px] overflow-hidden bg-transparent flex items-center justify-center">
+                        <div 
+                            className="animate-marquee font-techno text-[11px] text-white font-black uppercase tracking-[0.2em] drop-shadow-lg"
+                            style={{ textShadow: "1px 1px 3px rgba(0,0,0,0.7)" }}
                         >
-                            <LocateFixed size={22} />
+                            {vigilanceAlert}
+                        </div>
+                    </div>
+                )}
+
+                {/* Dock encore plus compact et semi-opaque (bg-[#e0f4f9]/40) */}
+                <div className="pointer-events-auto w-[90%] max-w-[340px] h-12 bg-[#e0f4f9]/40 backdrop-blur-md rounded-[24px] shadow-lg border border-white/30 flex items-center justify-between px-2.5">
+                    
+                    {/* Bouton 1 : GPS */}
+                    <button 
+                        onClick={() => {
+                            if (!isUserInGwada) {
+                                transformRef.current?.zoomToElement("svg-map", 1, 800);
+                                setIsFocusedOnUser(false);
+                                return;
+                            }
+                            const element = document.getElementById("user-halo");
+                            if (isFocusedOnUser || !element) {
+                                transformRef.current?.zoomToElement("svg-map", 1, 800);
+                                setIsFocusedOnUser(false);
+                            } else {
+                                transformRef.current?.zoomToElement("user-halo", 3, 800);
+                                setIsFocusedOnUser(true);
+                            }
+                        }}
+                        className={`h-9 w-9 rounded-full flex items-center justify-center active:scale-90 transition-all ${
+                            isFocusedOnUser && isUserInGwada ? "text-white" : "text-white/70 hover:text-white"
+                        }`}
+                    >
+                        <LocateFixed size={18} strokeWidth={isFocusedOnUser ? 2.5 : 2} />
+                    </button>
+
+                    {/* Bouton 2 : Recherche (Sheet contrôlé par l'état isSheetOpen) */}
+                    <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+                        <SheetTrigger asChild>
+                            <button className="h-9 w-9 rounded-full flex items-center justify-center active:scale-90 transition-transform text-white/70 hover:text-white">
+                                <Search size={18} strokeWidth={2.5} />
+                            </button>
+                        </SheetTrigger>
+                        
+                        <SheetContent side="bottom" className="h-[85vh] rounded-t-[45px] bg-[#e0f4f9] border-none p-0 overflow-hidden shadow-2xl flex flex-col">
+                            <div className="p-6 pb-4 border-b border-[#c8eaf3] sticky top-0 bg-[#e0f4f9] z-10">
+                                
+                                {/* HEADER AVEC LE TRIANGLE DE FERMETURE À GAUCHE */}
+                                <SheetHeader className="mb-4 flex flex-row items-center space-y-0">
+                                    <button 
+                                        onClick={() => setIsSheetOpen(false)} 
+                                        className="p-2 -ml-2 rounded-full active:scale-90 transition-transform bg-white/50 text-[#1f7c8a] shadow-sm shrink-0"
+                                    >
+                                        <ChevronDown size={22} strokeWidth={3} />
+                                    </button>
+                                    <SheetTitle className="text-xl font-black text-[#1f7c8a] italic uppercase flex-1 text-center pr-8">
+                                        {t("explore")}
+                                    </SheetTitle>
+                                </SheetHeader>
+
+                                <div className="bg-white rounded-xl shadow-sm flex items-center px-4 h-12 border border-black/5 mb-4 mt-2">
+                                    <Search size={18} className="text-gray-400 mr-3" />
+                                    <input
+                                        type="text"
+                                        value={query}
+                                        onChange={(e) => setQuery(e.target.value)}
+                                        placeholder={t("search_placeholder")}
+                                        className="flex-1 bg-transparent outline-none text-[15px] font-medium"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="text-[10px] font-black uppercase text-[#1f7c8a] tracking-widest opacity-70">{t("sort_by")}</span>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => toggleSort('popular')}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${
+                                                sortBy === 'popular' ? 'bg-[#1f7c8a] text-white shadow-md' : 'bg-white/60 text-[#1f7c8a] hover:bg-white'
+                                            }`}
+                                        >
+                                            <Star size={14} className={sortBy === 'popular' ? "fill-white" : ""} /> {t("popular")}
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                if (!isUserInGwada) alert("Activez votre localisation !");
+                                                else toggleSort('distance');
+                                            }}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${
+                                                sortBy === 'distance' ? 'bg-[#1f7c8a] text-white shadow-md' : 'bg-white/60 text-[#1f7c8a] hover:bg-white'
+                                            }`}
+                                        >
+                                            <MapPin size={14} className={sortBy === 'distance' ? "fill-white" : ""} /> {t("nearby")}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="p-4 space-y-3 overflow-y-auto flex-1 pb-10">
+                                {displayedBeaches.map(b => (
+                                    <button key={b.id} onClick={() => navigate(`/beach/${b.id}`)} className="w-full flex justify-between items-center p-4 bg-[#fdf5dd] border border-yellow-600/10 rounded-[24px] shadow-sm active:scale-95 transition-transform">
+                                        <div className="text-left leading-tight">
+                                            <div className="font-black text-[15px] text-gray-800">{getLocalizedText(b.name, language)}</div>
+                                            <div className="text-[10px] text-gray-500 font-bold uppercase mt-1 tracking-widest">{getLocalizedText(b.town, language)}</div>
+                                        </div>
+                                        <div className="h-5 w-5 rounded-full border border-black/5" style={{ backgroundColor: markerColorForBeach(reports, b.id) }} />
+                                    </button>
+                                ))}
+                            </div>
+                        </SheetContent>
+                    </Sheet>
+
+                    {/* Bouton 3 : ACTION SIGNALER (Rouge, Centré) ajusté en taille (h-10 w-10) */}
+                    <button 
+                        onClick={() => alert("À venir : Algorithme pour détecter la plage la plus proche !")}
+                        className="h-10 w-10 bg-red-500 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform border-2 border-white/50 text-white z-50 relative -mt-3"
+                    >
+                        <Plus size={20} strokeWidth={3} />
+                    </button>
+
+                    {/* Bouton 4 : Profil */}
+                    <button 
+                        onClick={() => setIsLoginOpen(true)} 
+                        className="h-9 w-9 rounded-full flex items-center justify-center active:scale-90 transition-all text-white/70 hover:text-white"
+                    >
+                        <User size={18} strokeWidth={2.5} />
+                    </button>
+
+                    {/* Bouton 5 : Langue */}
+                    <div className="relative h-9 w-9 flex items-center justify-center">
+                        <button 
+                            onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
+                            className="h-7 w-7 rounded-full flex items-center justify-center active:scale-90 transition-all"
+                        >
+                            <div className="text-[18px] leading-none drop-shadow-sm">{getFlagIcon(language)}</div>
                         </button>
 
-                        <button 
-                            onClick={() => setIsLoginOpen(true)} 
-                            className="h-11 w-11 bg-white rounded-full shadow-xl flex items-center justify-center active:scale-95 text-[#2c3e50] border-2 border-white"
-                        >
-                            <User size={22} />
-                        </button>
+                        {isLangMenuOpen && (
+                            <div className="absolute bottom-[120%] right-0 w-10 py-2 bg-white/40 backdrop-blur-xl border border-white/30 rounded-[20px] shadow-2xl flex flex-col gap-2 items-center z-[150] animate-in slide-in-from-bottom-2">
+                                {['fr', 'en', 'cr'].map(lng => (
+                                    <button 
+                                        key={lng}
+                                        onClick={() => { setLanguage(lng); setIsLangMenuOpen(false); }} 
+                                        className={`h-8 w-8 flex items-center justify-center rounded-full transition-colors ${language === lng ? 'bg-white/60' : ''}`}
+                                    >
+                                        <div className="text-[18px] leading-none drop-shadow-sm">{getFlagIcon(lng)}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        
+                        {isLangMenuOpen && (
+                            <div 
+                                className="fixed inset-0 z-[140]" 
+                                onClick={() => setIsLangMenuOpen(false)}
+                            />
+                        )}
                     </div>
 
-                    {/* SÉLECTEUR DE LANGUE (Les 3 drapeaux) */}
-                    <div className="flex bg-white/90 rounded-[20px] shadow-lg p-1 border border-white/50 backdrop-blur-md">
-                        <button onClick={() => setLanguage('fr')} className={`w-8 h-8 flex items-center justify-center rounded-full text-lg transition-all ${language === 'fr' ? 'bg-[#1f7c8a] scale-105 shadow-md' : 'opacity-40 grayscale hover:grayscale-0 hover:opacity-100'}`}>🇫🇷</button>
-                        <button onClick={() => setLanguage('en')} className={`w-8 h-8 flex items-center justify-center rounded-full text-lg transition-all ${language === 'en' ? 'bg-[#1f7c8a] scale-105 shadow-md' : 'opacity-40 grayscale hover:grayscale-0 hover:opacity-100'}`}>🇬🇧</button>
-                        <button onClick={() => setLanguage('cr')} className={`w-8 h-8 flex items-center justify-center rounded-full text-lg transition-all ${language === 'cr' ? 'bg-[#1f7c8a] scale-105 shadow-md' : 'opacity-40 grayscale hover:grayscale-0 hover:opacity-100'}`}>🇬🇵</button>
-                    </div>
                 </div>
             </div>
 
-            {/* 3. FOOTER : LE MENU MIXTE */}
-            <div className="absolute bottom-10 left-0 right-0 px-8 z-40 pointer-events-none flex flex-col items-center">
-                <Sheet>
-                    <SheetTrigger asChild>
-                        <button className="pointer-events-auto flex items-center gap-3 bg-white text-[#1f7c8a] px-10 py-5 rounded-full font-black shadow-2xl text-xs uppercase tracking-widest active:scale-95 transition-transform">
-                            {/* TRADUCTION ICI */}
-                            <Search size={18} strokeWidth={3} /> {t("search_beach")}
-                        </button>
-                    </SheetTrigger>
-                    
-                    <SheetContent side="bottom" className="h-[85vh] rounded-t-[45px] bg-[#e0f4f9] border-none p-0 overflow-hidden shadow-2xl flex flex-col">
-                        
-                        <div className="p-7 pb-4 border-b border-[#c8eaf3] sticky top-0 bg-[#e0f4f9] z-10 shrink-0">
-                            {/* TRADUCTION ICI */}
-                            <SheetHeader className="mb-4"><SheetTitle className="text-2xl font-black text-[#1f7c8a] italic uppercase">{t("explore")}</SheetTitle></SheetHeader>
-                            
-                            <div className="bg-white rounded-xl shadow-sm flex items-center px-4 h-12 border border-black/5 mb-4">
-                                <Search size={18} className="text-gray-400 mr-3 shrink-0" />
-                                {/* TRADUCTION ICI */}
-                                <input
-                                    type="text"
-                                    value={query}
-                                    onChange={(e) => setQuery(e.target.value)}
-                                    placeholder={t("search_placeholder")}
-                                    className="flex-1 bg-transparent outline-none text-[15px] font-medium appearance-none text-slate-900 h-full w-full"
-                                />
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                                {/* TRADUCTION ICI */}
-                                <span className="text-[10px] font-black uppercase text-[#1f7c8a] tracking-widest opacity-70">{t("sort_by")}</span>
-                                <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => toggleSort('popular')}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${
-                                            sortBy === 'popular' ? 'bg-[#1f7c8a] text-white shadow-md' : 'bg-white/60 text-[#1f7c8a] hover:bg-white'
-                                        }`}
-                                    >
-                                        <Star size={14} className={sortBy === 'popular' ? "fill-white" : ""} /> {t("popular")}
-                                    </button>
-                                    <button 
-                                        onClick={() => {
-                                            if (!isUserInGwada) alert("Activez votre localisation !");
-                                            else toggleSort('distance');
-                                        }}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${
-                                            sortBy === 'distance' ? 'bg-[#1f7c8a] text-white shadow-md' : 'bg-white/60 text-[#1f7c8a] hover:bg-white'
-                                        }`}
-                                    >
-                                        <MapPin size={14} className={sortBy === 'distance' ? "fill-white" : ""} /> {t("nearby")}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div className="p-4 space-y-3 overflow-y-auto flex-1 pb-10">
-                            {displayedBeaches.length > 0 ? (
-                                displayedBeaches.map(b => (
-                                    <button key={b.id} onClick={() => navigate(`/beach/${b.id}`)} className="w-full flex justify-between items-center p-4 bg-[#fdf5dd] border border-yellow-600/10 rounded-[24px] shadow-sm active:scale-95 transition-transform">
-                                        <div className="text-left leading-tight">
-                                            <div className="font-black text-[15px] text-gray-800">{b.name}</div>
-                                            
-                                            <div className="text-[10px] text-gray-500 font-bold uppercase mb-2.5 flex items-center gap-2">
-                                                <span>{b.town}</span>
-                                                {b.dist !== undefined && (
-                                                    <>
-                                                        <span className="w-1 h-1 rounded-full bg-yellow-600/30" />
-                                                        <span className="text-[#1f7c8a] flex items-center gap-0.5">
-                                                            {/* TRADUCTION DE LA DISTANCE ICI */}
-                                                            <MapPin size={10} /> {formatDist(b.dist, t)}
-                                                        </span>
-                                                    </>
-                                                )}
-                                            </div>
-                                            
-                                            <div className="flex gap-2">
-                                                <div className="flex items-center gap-1.5 px-2 py-1 bg-white/60 rounded-lg text-[10px] font-black text-slate-700">
-                                                    {/* TRADUCTION OUI/NON ICI */}
-                                                    <span className="text-sm">🚗</span> {b.parking.includes("Oui") ? t("yes") : t("no")}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 px-2 py-1 bg-white/60 rounded-lg text-[10px] font-black text-slate-700">
-                                                    <span className="text-sm">🚿</span> {b.douche.includes("Oui") ? t("yes") : t("no")}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        
-                                        <div className="flex flex-col items-center gap-1.5 shrink-0 ml-3">
-                                            {/* TRADUCTION ICI */}
-                                            <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{t("state")}</span>
-                                            <div className="h-5 w-5 rounded-full shadow-inner border border-black/5" style={{ backgroundColor: markerColorForBeach(reports, b.id) }} />
-                                        </div>
-                                    </button>
-                                ))
-                            ) : (
-                                <div className="text-center p-8 text-[#1f7c8a] font-bold opacity-60">
-                                    {/* TRADUCTION ICI */}
-                                    {t("no_beach_found")}
-                                </div>
-                            )}
-                        </div>
-                    </SheetContent>
-                </Sheet>
-            </div>
-
-            {/* OUTIL DE CALIBRATION */}
-            <div className="absolute top-24 left-4 z-[130] pointer-events-auto">
-                {!q && (
-                    <button onClick={() => setCalibMode(!calibMode)} className={`p-2 rounded-lg text-[10px] font-bold shadow-xl border ${calibMode ? 'bg-red-600 text-white border-red-600' : 'bg-white/90 text-black border-white'}`}>
-                        {calibMode ? "✖" : "🔧"}
-                    </button>
-                )}
+            {/* CALIBRATION (Outil caché) */}
+            <div className="absolute top-24 left-4 z-[130] pointer-events-auto opacity-20 hover:opacity-100">
+                <button onClick={() => setCalibMode(!calibMode)} className="text-white"><Search size={16} /></button>
             </div>
             {calibMode && tempCoords && (
-                <div className="fixed top-36 left-4 z-[130] bg-black text-white text-[9px] p-2 rounded font-mono shadow-2xl">
+                <div className="fixed top-36 left-4 z-[130] bg-black text-white text-[8px] p-2 rounded font-mono shadow-2xl">
                     x:{tempCoords.x} y:{tempCoords.y}
                 </div>
             )}
