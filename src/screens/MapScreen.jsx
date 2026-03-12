@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { beaches } from "../data/beaches.js";
 import { markerColorForBeach } from "../utils/reports.js";
-import { Search, User, LocateFixed, Star, MapPin, Plus, ChevronDown } from "lucide-react";
+import { Search, User, LocateFixed, Star, MapPin, ChevronDown, Info, X } from "lucide-react"; // Ajout de Info et X
 
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -73,13 +73,16 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     const [scale, setScale] = useState(1);
     const [calibMode, setCalibMode] = useState(false);
     const [tempCoords, setTempCoords] = useState(null);
-    const [isLoginOpen, setIsLoginOpen] = useState(false);
     
+    // Le menu des langues
     const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
     
-    // Nouvel état pour contrôler l'ouverture de la liste des plages
+    // État pour l'ouverture de la liste des plages
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     
+    // NOUVEAU : État pour le Pop-up d'Information ('main', 'guide', 'terms', ou null si fermé)
+    const [infoModalView, setInfoModalView] = useState(null);
+
     const [isFocusedOnUser, setIsFocusedOnUser] = useState(globalGPSMemory.isFocused);
 
     // --- ÉTAT DE LA VIGILANCE ---
@@ -88,7 +91,7 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     useEffect(() => {
         const fetchVigilance = async () => {
             try {
-                // Remplacer l'URL ci-dessous par l'URL Météo-France API quand tu l'auras
+                // Remplacer l'URL ci-dessous par l'URL Météo-France API
             } catch (error) {
                 console.error("Erreur API Vigilance:", error);
             }
@@ -121,11 +124,16 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
 
         if (transformRef.current) {
             const timer = setTimeout(() => {
-                transformRef.current.centerView(1, 0);
-                const { positionX } = transformRef.current.state;
-                const visualOffsetX = -15; 
-                transformRef.current.setTransform(positionX + visualOffsetX, 0, 1, 0);
-                globalGPSMemory.hasDoneVisualCenter = true;
+                if (transformRef.current) {
+                    transformRef.current.centerView(1, 0);
+                    const state = transformRef.current.state || transformRef.current.instance?.transformState;
+                    if (state) {
+                        const { positionX } = state;
+                        const visualOffsetX = -15; 
+                        transformRef.current.setTransform(positionX + visualOffsetX, 0, 1, 0);
+                    }
+                    globalGPSMemory.hasDoneVisualCenter = true;
+                }
             }, 100); 
             return () => clearTimeout(timer);
         }
@@ -173,10 +181,33 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
         return <img src="/creole.png" alt="Créole" className="w-5 h-5 object-cover rounded-full shadow-sm" />;
     };
 
+    const handleSignalClick = () => {
+        if (!isUserInGwada || !userPosition) {
+            alert("Activez votre localisation en Guadeloupe pour signaler autour de vous !");
+            return;
+        }
+        
+        let nearest = null;
+        let minDist = Infinity;
+        
+        beaches.forEach(b => {
+            const beachGps = b.lat && b.lng ? { lat: b.lat, lng: b.lng } : mapToGps(b.map?.x || 0, b.map?.y || 0);
+            const dist = calcDistanceKm(userPosition.lat, userPosition.lng, beachGps.lat, beachGps.lng);
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = b;
+            }
+        });
+        
+        if (nearest) {
+            navigate(`/beach/${nearest.id}/report`);
+        }
+    };
+
     return (
         <div className="fixed inset-0 h-[100dvh] w-full overflow-hidden bg-[#0e3868] font-sans">
             
-            <style>{`
+            <style dangerouslySetInnerHTML={{ __html: `
                 @keyframes scrollMarquee {
                     0% { transform: translateX(100%); }
                     100% { transform: translateX(-100%); }
@@ -190,7 +221,7 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     font-family: 'Courier New', Courier, monospace;
                     font-weight: 300;
                 }
-            `}</style>
+            `}} />
 
             <div className="absolute inset-0 z-0 h-full w-full">
                 <TransformWrapper
@@ -279,8 +310,16 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                 </TransformWrapper>
             </div>
 
-            <div className="absolute top-0 left-0 p-4 pt-6 z-[120] pointer-events-none">
+            {/* EN-TÊTE CENTRÉE (LOGO + INFO) */}
+            <div className="absolute top-0 left-0 right-0 pt-6 px-4 z-[120] pointer-events-none flex justify-between items-start">
+                <div className="w-10"></div> {/* Espace pour centrer parfaitement le logo */}
                 <img src="/logo_titre.png" alt="Logo" className="h-14 w-auto object-contain drop-shadow-lg pointer-events-auto" />
+                <button 
+                    onClick={() => setInfoModalView('main')}
+                    className="h-10 w-10 mt-2 rounded-full flex items-center justify-center pointer-events-auto text-white/50 hover:text-white active:scale-90 transition-all bg-black/10 backdrop-blur-sm border border-white/10"
+                >
+                    <Info size={22} strokeWidth={2.5} />
+                </button>
             </div>
 
             <div className="absolute bottom-6 left-0 right-0 px-4 z-40 pointer-events-none flex flex-col items-center gap-3">
@@ -296,10 +335,8 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     </div>
                 )}
 
-                {/* Dock encore plus compact et semi-opaque (bg-[#e0f4f9]/40) */}
+                {/* Dock compact */}
                 <div className="pointer-events-auto w-[90%] max-w-[340px] h-12 bg-[#e0f4f9]/40 backdrop-blur-md rounded-[24px] shadow-lg border border-white/30 flex items-center justify-between px-2.5">
-                    
-                    {/* Bouton 1 : GPS */}
                     <button 
                         onClick={() => {
                             if (!isUserInGwada) {
@@ -323,7 +360,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                         <LocateFixed size={18} strokeWidth={isFocusedOnUser ? 2.5 : 2} />
                     </button>
 
-                    {/* Bouton 2 : Recherche (Sheet contrôlé par l'état isSheetOpen) */}
                     <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
                         <SheetTrigger asChild>
                             <button className="h-9 w-9 rounded-full flex items-center justify-center active:scale-90 transition-transform text-white/70 hover:text-white">
@@ -333,8 +369,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                         
                         <SheetContent side="bottom" className="h-[85vh] rounded-t-[45px] bg-[#e0f4f9] border-none p-0 overflow-hidden shadow-2xl flex flex-col">
                             <div className="p-6 pb-4 border-b border-[#c8eaf3] sticky top-0 bg-[#e0f4f9] z-10">
-                                
-                                {/* HEADER AVEC LE TRIANGLE DE FERMETURE À GAUCHE */}
                                 <SheetHeader className="mb-4 flex flex-row items-center space-y-0">
                                     <button 
                                         onClick={() => setIsSheetOpen(false)} 
@@ -397,23 +431,20 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                         </SheetContent>
                     </Sheet>
 
-                    {/* Bouton 3 : ACTION SIGNALER (Rouge, Centré) ajusté en taille (h-10 w-10) */}
                     <button 
-                        onClick={() => alert("À venir : Algorithme pour détecter la plage la plus proche !")}
-                        className="h-10 w-10 bg-red-500 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform border-2 border-white/50 text-white z-50 relative -mt-3"
+                        onClick={handleSignalClick}
+                        className="h-14 w-14 rounded-full flex items-center justify-center active:scale-90 transition-transform z-50 relative -mt-5"
                     >
-                        <Plus size={20} strokeWidth={3} />
+                        <img src="/signal.png" alt="Signaler" className="w-full h-full object-contain drop-shadow-md" />
                     </button>
 
-                    {/* Bouton 4 : Profil */}
                     <button 
-                        onClick={() => setIsLoginOpen(true)} 
+                        onClick={() => navigate('/profile')} 
                         className="h-9 w-9 rounded-full flex items-center justify-center active:scale-90 transition-all text-white/70 hover:text-white"
                     >
                         <User size={18} strokeWidth={2.5} />
                     </button>
 
-                    {/* Bouton 5 : Langue */}
                     <div className="relative h-9 w-9 flex items-center justify-center">
                         <button 
                             onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
@@ -446,6 +477,103 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
 
                 </div>
             </div>
+
+            {/* --- LA BULLE D'INFORMATION --- */}
+            {infoModalView && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center px-4">
+                    {/* Fond sombre cliquable pour fermer totalement */}
+                    <div 
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                        onClick={() => setInfoModalView(null)}
+                    ></div>
+                    
+                    <div className="relative bg-[#e0f4f9] w-full max-w-[340px] rounded-[35px] p-6 shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
+                        
+                        {/* Bouton Fermer */}
+                        <button 
+                            onClick={() => setInfoModalView(null)}
+                            className="absolute top-4 right-4 h-8 w-8 bg-white/50 text-[#1f7c8a] rounded-full flex items-center justify-center active:scale-90 transition-transform z-10"
+                        >
+                            <X size={18} strokeWidth={3} />
+                        </button>
+
+                        {/* VUE PRINCIPALE */}
+                        {infoModalView === 'main' && (
+                            <div className="flex flex-col items-center animate-in slide-in-from-left-4">
+                                <img src="/logo_titre.png" alt="Logo" className="h-10 w-auto object-contain mb-4 mt-2" />
+                                <h2 className="text-xl font-black text-[#1f7c8a] uppercase italic text-center mb-3">À propos</h2>
+                                <p className="text-sm text-slate-600 font-medium text-center mb-6 leading-relaxed">
+                                    Gwada Plages est votre radar météo communautaire en temps réel. Découvrez l'état des plages de Guadeloupe, repérez les sargasses avant de vous déplacer, et aidez la communauté en partageant vos propres observations !
+                                </p>
+                                <div className="w-full flex flex-col gap-3">
+                                    <button 
+                                        onClick={() => setInfoModalView('guide')}
+                                        className="w-full py-3 bg-[#1f7c8a] text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-md"
+                                    >
+                                        Mode d'emploi
+                                    </button>
+                                    <button 
+                                        onClick={() => setInfoModalView('terms')}
+                                        className="w-full py-3 bg-white text-[#1f7c8a] border border-[#1f7c8a]/20 rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-sm"
+                                    >
+                                        Conditions d'utilisation
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* VUE MODE D'EMPLOI */}
+                        {infoModalView === 'guide' && (
+                            <div className="flex flex-col animate-in slide-in-from-right-4">
+                                <h2 className="text-lg font-black text-[#1f7c8a] uppercase italic text-center mb-4 mt-2">Mode d'emploi</h2>
+                                <div className="space-y-4 mb-6 text-sm text-slate-600 font-medium max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                                    <div className="flex gap-3">
+                                        <div className="text-xl">🗺️</div>
+                                        <p><strong>Explorez :</strong> Naviguez sur la carte pour voir les points de couleur (Vert = OK, Rouge = Problème).</p>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <div className="text-xl">🔍</div>
+                                        <p><strong>Consultez :</strong> Cliquez sur une plage pour voir la météo, la mer et la présence de sargasses.</p>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <div className="text-xl">📢</div>
+                                        <p><strong>Participez :</strong> Utilisez le bouton signalement quand vous êtes sur place pour informer les autres !</p>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <div className="text-xl">🏆</div>
+                                        <p><strong>Évoluez :</strong> Créez un profil pour gagner de l'expérience et débloquer des grades exclusifs.</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => setInfoModalView('main')}
+                                    className="w-full py-3 bg-white text-slate-500 rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-sm border border-slate-100"
+                                >
+                                    Retour
+                                </button>
+                            </div>
+                        )}
+
+                        {/* VUE CONDITIONS */}
+                        {infoModalView === 'terms' && (
+                            <div className="flex flex-col animate-in slide-in-from-right-4">
+                                <h2 className="text-lg font-black text-[#1f7c8a] uppercase italic text-center mb-4 mt-2">Conditions</h2>
+                                <div className="space-y-3 mb-6 text-[13px] text-slate-600 font-medium max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar text-justify leading-relaxed">
+                                    <p>Gwada Plages est un outil collaboratif gratuit. Les informations affichées sont majoritairement basées sur les signalements de la communauté et sur des API publiques.</p>
+                                    <p><strong>Responsabilité :</strong> L'éditeur de l'application ne saurait être tenu pour responsable de l'inexactitude des données (météo, sargasses, etc.) ou de tout incident survenant lors de la visite des lieux.</p>
+                                    <p><strong>Modération :</strong> Tout comportement abusif (faux signalements répétés) entraînera une limitation de votre compte.</p>
+                                </div>
+                                <button 
+                                    onClick={() => setInfoModalView('main')}
+                                    className="w-full py-3 bg-white text-slate-500 rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-sm border border-slate-100"
+                                >
+                                    Retour
+                                </button>
+                            </div>
+                        )}
+
+                    </div>
+                </div>
+            )}
 
             {/* CALIBRATION (Outil caché) */}
             <div className="absolute top-24 left-4 z-[130] pointer-events-auto opacity-20 hover:opacity-100">

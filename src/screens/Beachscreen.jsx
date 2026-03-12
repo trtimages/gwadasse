@@ -33,6 +33,15 @@ function getLocalizedText(dataObj, lang) {
     return (lang === 'cr' && dataObj.cr) ? dataObj.cr : (dataObj.fr || "");
 }
 
+// --- NETTOYEUR DE NOM DE PLAGE ---
+function cleanBeachName(textName) {
+    if (!textName) return "";
+    let cleaned = textName.replace(/^plage (de la |de l'|des |du |d'|de )?|^des /i, "").trim();
+    if (/^caravelle/i.test(cleaned)) return "La Caravelle";
+    if (/^perle/i.test(cleaned)) return "La Perle";
+    return cleaned;
+}
+
 // --- TRADUCTION DES ÉTATS ---
 function decisionText(kind, level, language) {
     if (!level) return ""; 
@@ -280,8 +289,9 @@ export default function BeachScreen({ reports = [], addReports, userPosition }) 
 
                     <div className="flex-1">
                         <div className="flex items-center justify-between">
-                            <h1 className="text-[15px] font-black text-black leading-tight uppercase tracking-tight line-clamp-2 pr-2">
-                                {getLocalizedText(beach.name, language)}
+                            {/* TITRE ÉPURÉ ET RÉDUIT (text-[13px] au lieu de text-[15px]) */}
+                            <h1 className="text-[13px] font-black text-black leading-tight uppercase tracking-tight line-clamp-2 pr-2">
+                                {cleanBeachName(getLocalizedText(beach.name, language))}
                             </h1>
 
                             <div className="flex items-center pl-2 shrink-0">
@@ -301,7 +311,7 @@ export default function BeachScreen({ reports = [], addReports, userPosition }) 
                                         <div className="p-6">
                                             <DialogHeader>
                                                 <DialogTitle className="text-xl font-black uppercase text-slate-800 text-center mb-1">
-                                                    {getLocalizedText(beach.name, language)}
+                                                    {cleanBeachName(getLocalizedText(beach.name, language))}
                                                 </DialogTitle>
                                                 <div className="text-center text-[10px] text-slate-400 font-bold uppercase mb-4 tracking-widest">
                                                     {getLocalizedText(beach.town, language)}
