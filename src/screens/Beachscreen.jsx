@@ -122,7 +122,7 @@ function EventItem({ value, title, kind, activeDecision, allBeachReports, apiFal
                         <img 
                             src={iconForState(kind, level)} 
                             alt="" 
-                            className={`w-11 h-11 object-contain drop-shadow-sm transition-all ${isOutdated ? 'grayscale opacity-50' : ''}`} 
+                            className={`w-[53px] h-[53px] object-contain drop-shadow-sm transition-all ${isOutdated ? 'grayscale opacity-50' : ''}`} 
                         />
                         <div className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-[2px] border-white ${
                             level === 0 ? 'bg-gray-200' :

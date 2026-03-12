@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { beaches } from "../data/beaches.js";
 import { markerColorForBeach } from "../utils/reports.js";
-import { Search, User, LocateFixed, Star, MapPin, ChevronDown, Info, X } from "lucide-react"; // Ajout de Info et X
+import { Search, User, LocateFixed, Star, MapPin, ChevronDown, X } from "lucide-react"; // Info retiré d'ici
 
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -80,7 +80,7 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     // État pour l'ouverture de la liste des plages
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     
-    // NOUVEAU : État pour le Pop-up d'Information ('main', 'guide', 'terms', ou null si fermé)
+    // État pour le Pop-up d'Information ('main', 'guide', 'terms', ou null si fermé)
     const [infoModalView, setInfoModalView] = useState(null);
 
     const [isFocusedOnUser, setIsFocusedOnUser] = useState(globalGPSMemory.isFocused);
@@ -310,15 +310,21 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                 </TransformWrapper>
             </div>
 
-            {/* EN-TÊTE CENTRÉE (LOGO + INFO) */}
+            {/* EN-TÊTE CENTRÉE (LOGO + IMAGE INFO) */}
             <div className="absolute top-0 left-0 right-0 pt-6 px-4 z-[120] pointer-events-none flex justify-between items-start">
                 <div className="w-10"></div> {/* Espace pour centrer parfaitement le logo */}
                 <img src="/logo_titre.png" alt="Logo" className="h-14 w-auto object-contain drop-shadow-lg pointer-events-auto" />
+                
+                {/* NOUVEAU BOUTON INFO (Image PNG) */}
                 <button 
                     onClick={() => setInfoModalView('main')}
-                    className="h-10 w-10 mt-2 rounded-full flex items-center justify-center pointer-events-auto text-white/50 hover:text-white active:scale-90 transition-all bg-black/10 backdrop-blur-sm border border-white/10"
+                    className="h-10 w-10 mt-2 flex items-center justify-center pointer-events-auto active:scale-90 transition-transform"
                 >
-                    <Info size={22} strokeWidth={2.5} />
+                    <img 
+                        src="/info.png" 
+                        alt="Informations" 
+                        className="w-full h-full object-contain drop-shadow-md opacity-80 hover:opacity-100"
+                    />
                 </button>
             </div>
 
