@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { beaches } from "../data/beaches.js";
 import { markerColorForBeach } from "../utils/reports.js";
-import { Search, User, LocateFixed, Star, MapPin, ChevronDown, X } from "lucide-react"; // Info retiré d'ici
+import { Search, User, LocateFixed, Star, MapPin, ChevronDown, X, Heart } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -12,7 +12,15 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useLanguage } from "../i18n/LanguageContext";
 
 // --- MÉMOIRE GLOBALE & GÉOMÉTRIE ---
-let globalGPSMemory = { isFocused: false, hasInitialized: false, hasDoneVisualCenter: false };
+// Ajout de lastX, lastY et lastScale pour mémoriser la vue exacte
+let globalGPSMemory = { 
+    isFocused: false, 
+    hasInitialized: false, 
+    hasDoneVisualCenter: false,
+    lastX: null,
+    lastY: null,
+    lastScale: 1
+};
 const mapBounds = { north: 16.55, south: 15.80, west: -61.85, east: -61.00 };
 
 function gpsToMap(lat, lng) {
@@ -62,7 +70,7 @@ function getLocalizedText(dataObj, lang) {
     return (lang === 'cr' && dataObj.cr) ? dataObj.cr : (dataObj.fr || "");
 }
 
-export default function MapScreen({ userPosition, gpsError, reports }) {
+export default function MapScreen({ userPosition, gpsError, reports, userProfile }) {
     const langContext = useLanguage();
     const { language = 'fr', setLanguage = () => {}, t = (k) => k } = langContext || {};
 
@@ -70,22 +78,14 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     const transformRef = useRef(null);
     const [query, setQuery] = useState("");
     const [sortBy, setSortBy] = useState(null);
-    const [scale, setScale] = useState(1);
+    const [scale, setScale] = useState(globalGPSMemory.lastScale);
     const [calibMode, setCalibMode] = useState(false);
     const [tempCoords, setTempCoords] = useState(null);
     
-    // Le menu des langues
     const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
-    
-    // État pour l'ouverture de la liste des plages
     const [isSheetOpen, setIsSheetOpen] = useState(false);
-    
-    // État pour le Pop-up d'Information ('main', 'guide', 'terms', ou null si fermé)
     const [infoModalView, setInfoModalView] = useState(null);
-
     const [isFocusedOnUser, setIsFocusedOnUser] = useState(globalGPSMemory.isFocused);
-
-    // --- ÉTAT DE LA VIGILANCE ---
     const [vigilanceAlert, setVigilanceAlert] = useState("⚠️ Vigilance orange en cours - Soyez prudents ⚠️");
 
     useEffect(() => {
@@ -120,7 +120,8 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     }, [isUserInGwada]);
 
     useEffect(() => {
-        if (globalGPSMemory.hasInitialized || globalGPSMemory.hasDoneVisualCenter) return;
+        // Si on a déjà sauvegardé une position (lastX n'est pas null), pas besoin de recentrer
+        if (globalGPSMemory.hasInitialized || globalGPSMemory.hasDoneVisualCenter || globalGPSMemory.lastX !== null) return;
 
         if (transformRef.current) {
             const timer = setTimeout(() => {
@@ -128,9 +129,14 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     transformRef.current.centerView(1, 0);
                     const state = transformRef.current.state || transformRef.current.instance?.transformState;
                     if (state) {
-                        const { positionX } = state;
+                        const { positionX, positionY } = state;
                         const visualOffsetX = -15; 
-                        transformRef.current.setTransform(positionX + visualOffsetX, 0, 1, 0);
+                        transformRef.current.setTransform(positionX + visualOffsetX, positionY, 1, 0);
+                        
+                        // SAUVEGARDE DE LA POSITION INITIALE DANS LA MÉMOIRE
+                        globalGPSMemory.lastX = positionX + visualOffsetX;
+                        globalGPSMemory.lastY = positionY;
+                        globalGPSMemory.lastScale = 1;
                     }
                     globalGPSMemory.hasDoneVisualCenter = true;
                 }
@@ -178,7 +184,7 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
     const getFlagIcon = (lng) => {
         if (lng === 'fr') return '🇫🇷';
         if (lng === 'en') return '🇬🇧';
-        return <img src="/creole.png" alt="Créole" className="w-5 h-5 object-cover rounded-full shadow-sm" />;
+        return <img src="/creole.png" alt="Créole" className="w-6 h-6 object-cover rounded-full shadow-sm" />;
     };
 
     const handleSignalClick = () => {
@@ -204,6 +210,10 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
         }
     };
 
+    const isFavorite = (beachId) => {
+        return userProfile?.favorites?.includes(beachId) || false;
+    };
+
     return (
         <div className="fixed inset-0 h-[100dvh] w-full overflow-hidden bg-[#0e3868] font-sans">
             
@@ -226,12 +236,20 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
             <div className="absolute inset-0 z-0 h-full w-full">
                 <TransformWrapper
                     ref={transformRef}
-                    initialScale={1}
+                    initialScale={globalGPSMemory.lastScale}
+                    initialPositionX={globalGPSMemory.lastX !== null ? globalGPSMemory.lastX : 0}
+                    initialPositionY={globalGPSMemory.lastY !== null ? globalGPSMemory.lastY : 0}
                     minScale={0.4}
                     maxScale={12}
                     centerOnInit={false} 
                     limitToBounds={false}
-                    onTransformed={(ref) => setScale(ref.state.scale)}
+                    onTransformed={(ref) => {
+                        // ON SAUVEGARDE EN TEMPS RÉEL CHAQUE MOUVEMENT
+                        setScale(ref.state.scale);
+                        globalGPSMemory.lastScale = ref.state.scale;
+                        globalGPSMemory.lastX = ref.state.positionX;
+                        globalGPSMemory.lastY = ref.state.positionY;
+                    }}
                     onPanningStop={() => {
                         if (isFocusedOnUser) {
                             setIsFocusedOnUser(false);
@@ -310,22 +328,48 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                 </TransformWrapper>
             </div>
 
-            {/* EN-TÊTE CENTRÉE (LOGO + IMAGE INFO) */}
+            {/* EN-TÊTE CENTRÉE (LOGO + INFO + LANGUE) */}
             <div className="absolute top-0 left-0 right-0 pt-6 px-4 z-[120] pointer-events-none flex justify-between items-start">
-                <div className="w-10"></div> {/* Espace pour centrer parfaitement le logo */}
+                
+                <div className="w-[88px]"></div> 
+                
                 <img src="/logo_titre.png" alt="Logo" className="h-14 w-auto object-contain drop-shadow-lg pointer-events-auto" />
                 
-                {/* NOUVEAU BOUTON INFO (Image PNG) */}
-                <button 
-                    onClick={() => setInfoModalView('main')}
-                    className="h-10 w-10 mt-2 flex items-center justify-center pointer-events-auto active:scale-90 transition-transform"
-                >
-                    <img 
-                        src="/info.png" 
-                        alt="Informations" 
-                        className="w-full h-full object-contain drop-shadow-md opacity-80 hover:opacity-100"
-                    />
-                </button>
+                <div className="flex items-center gap-2 pointer-events-auto mt-2">
+                    <button 
+                        onClick={() => setInfoModalView('main')}
+                        className="h-10 w-10 flex items-center justify-center active:scale-90 transition-transform"
+                    >
+                        <img src="/info.png" alt="Informations" className="w-full h-full object-contain drop-shadow-md opacity-80 hover:opacity-100" />
+                    </button>
+
+                    <div className="relative h-10 w-10 flex items-center justify-center">
+                        <button 
+                            onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
+                            className="h-10 w-10 rounded-full flex items-center justify-center active:scale-90 transition-all bg-black/20 backdrop-blur-sm border border-white/20 shadow-md"
+                        >
+                            <div className="text-[20px] leading-none drop-shadow-sm">{getFlagIcon(language)}</div>
+                        </button>
+
+                        {isLangMenuOpen && (
+                            <div className="absolute top-[120%] right-0 w-12 py-2 bg-white/40 backdrop-blur-xl border border-white/30 rounded-[20px] shadow-2xl flex flex-col gap-2 items-center z-[150] animate-in slide-in-from-top-2">
+                                {['fr', 'en', 'cr'].map(lng => (
+                                    <button 
+                                        key={lng}
+                                        onClick={() => { setLanguage(lng); setIsLangMenuOpen(false); }} 
+                                        className={`h-9 w-9 flex items-center justify-center rounded-full transition-colors ${language === lng ? 'bg-white/80 shadow-inner' : 'hover:bg-white/50'}`}
+                                    >
+                                        <div className="text-[20px] leading-none drop-shadow-sm">{getFlagIcon(lng)}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        
+                        {isLangMenuOpen && (
+                            <div className="fixed inset-0 z-[140]" onClick={() => setIsLangMenuOpen(false)} />
+                        )}
+                    </div>
+                </div>
             </div>
 
             <div className="absolute bottom-6 left-0 right-0 px-4 z-40 pointer-events-none flex flex-col items-center gap-3">
@@ -341,8 +385,8 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     </div>
                 )}
 
-                {/* Dock compact */}
                 <div className="pointer-events-auto w-[90%] max-w-[340px] h-12 bg-[#e0f4f9]/40 backdrop-blur-md rounded-[24px] shadow-lg border border-white/30 flex items-center justify-between px-2.5">
+                    
                     <button 
                         onClick={() => {
                             if (!isUserInGwada) {
@@ -425,12 +469,42 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                             
                             <div className="p-4 space-y-3 overflow-y-auto flex-1 pb-10">
                                 {displayedBeaches.map(b => (
-                                    <button key={b.id} onClick={() => navigate(`/beach/${b.id}`)} className="w-full flex justify-between items-center p-4 bg-[#fdf5dd] border border-yellow-600/10 rounded-[24px] shadow-sm active:scale-95 transition-transform">
-                                        <div className="text-left leading-tight">
-                                            <div className="font-black text-[15px] text-gray-800">{getLocalizedText(b.name, language)}</div>
-                                            <div className="text-[10px] text-gray-500 font-bold uppercase mt-1 tracking-widest">{getLocalizedText(b.town, language)}</div>
+                                    <button 
+                                        key={b.id} 
+                                        onClick={() => navigate(`/beach/${b.id}`)} 
+                                        className="w-full flex justify-between items-center p-4 bg-[#fdf5dd] border border-yellow-600/10 rounded-[24px] shadow-sm active:scale-95 transition-transform"
+                                    >
+                                        <div className="text-left leading-tight flex-1">
+                                            <div className="font-black text-[15px] text-gray-800 flex items-center gap-2">
+                                                {getLocalizedText(b.name, language)}
+                                                {isFavorite(b.id) && (
+                                                    <Heart size={14} className="fill-red-500 text-red-500" />
+                                                )}
+                                            </div>
+                                            
+                                            <div className="text-[10px] text-gray-500 font-bold uppercase mt-1 tracking-widest flex items-center gap-2">
+                                                {getLocalizedText(b.town, language)}
+                                                {b.dist !== undefined && (
+                                                    <span className="text-[#1f7c8a]"> • {formatDist(b.dist, t)}</span>
+                                                )}
+                                            </div>
+
+                                            <div className="flex gap-2 mt-2">
+                                                {b.parking === "Oui" || b.parking === "Oui (petit)" ? (
+                                                    <span className="flex items-center gap-1 bg-white/60 text-slate-500 px-2 py-0.5 rounded-md text-[10px] font-bold border border-slate-200">
+                                                        🚗 {b.parking === "Oui (petit)" ? "Petit Parking" : "Parking"}
+                                                    </span>
+                                                ) : null}
+                                                
+                                                {b.douche === "Oui" && (
+                                                    <span className="flex items-center gap-1 bg-white/60 text-blue-500 px-2 py-0.5 rounded-md text-[10px] font-bold border border-blue-200">
+                                                        🚿 Douche
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="h-5 w-5 rounded-full border border-black/5" style={{ backgroundColor: markerColorForBeach(reports, b.id) }} />
+
+                                        <div className="h-5 w-5 rounded-full border border-black/5 shrink-0 ml-3 shadow-inner" style={{ backgroundColor: markerColorForBeach(reports, b.id) }} />
                                     </button>
                                 ))}
                             </div>
@@ -451,43 +525,18 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                         <User size={18} strokeWidth={2.5} />
                     </button>
 
-                    <div className="relative h-9 w-9 flex items-center justify-center">
-                        <button 
-                            onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
-                            className="h-7 w-7 rounded-full flex items-center justify-center active:scale-90 transition-all"
-                        >
-                            <div className="text-[18px] leading-none drop-shadow-sm">{getFlagIcon(language)}</div>
-                        </button>
-
-                        {isLangMenuOpen && (
-                            <div className="absolute bottom-[120%] right-0 w-10 py-2 bg-white/40 backdrop-blur-xl border border-white/30 rounded-[20px] shadow-2xl flex flex-col gap-2 items-center z-[150] animate-in slide-in-from-bottom-2">
-                                {['fr', 'en', 'cr'].map(lng => (
-                                    <button 
-                                        key={lng}
-                                        onClick={() => { setLanguage(lng); setIsLangMenuOpen(false); }} 
-                                        className={`h-8 w-8 flex items-center justify-center rounded-full transition-colors ${language === lng ? 'bg-white/60' : ''}`}
-                                    >
-                                        <div className="text-[18px] leading-none drop-shadow-sm">{getFlagIcon(lng)}</div>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                        
-                        {isLangMenuOpen && (
-                            <div 
-                                className="fixed inset-0 z-[140]" 
-                                onClick={() => setIsLangMenuOpen(false)}
-                            />
-                        )}
-                    </div>
+                    <button 
+                        onClick={() => navigate('/favorites')} 
+                        className="h-9 w-9 rounded-full flex items-center justify-center active:scale-90 transition-all text-white/70 hover:text-white"
+                    >
+                        <Heart size={18} strokeWidth={2.5} />
+                    </button>
 
                 </div>
             </div>
 
-            {/* --- LA BULLE D'INFORMATION --- */}
             {infoModalView && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center px-4">
-                    {/* Fond sombre cliquable pour fermer totalement */}
                     <div 
                         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                         onClick={() => setInfoModalView(null)}
@@ -495,7 +544,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                     
                     <div className="relative bg-[#e0f4f9] w-full max-w-[340px] rounded-[35px] p-6 shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
                         
-                        {/* Bouton Fermer */}
                         <button 
                             onClick={() => setInfoModalView(null)}
                             className="absolute top-4 right-4 h-8 w-8 bg-white/50 text-[#1f7c8a] rounded-full flex items-center justify-center active:scale-90 transition-transform z-10"
@@ -503,7 +551,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                             <X size={18} strokeWidth={3} />
                         </button>
 
-                        {/* VUE PRINCIPALE */}
                         {infoModalView === 'main' && (
                             <div className="flex flex-col items-center animate-in slide-in-from-left-4">
                                 <img src="/logo_titre.png" alt="Logo" className="h-10 w-auto object-contain mb-4 mt-2" />
@@ -528,7 +575,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                             </div>
                         )}
 
-                        {/* VUE MODE D'EMPLOI */}
                         {infoModalView === 'guide' && (
                             <div className="flex flex-col animate-in slide-in-from-right-4">
                                 <h2 className="text-lg font-black text-[#1f7c8a] uppercase italic text-center mb-4 mt-2">Mode d'emploi</h2>
@@ -559,7 +605,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                             </div>
                         )}
 
-                        {/* VUE CONDITIONS */}
                         {infoModalView === 'terms' && (
                             <div className="flex flex-col animate-in slide-in-from-right-4">
                                 <h2 className="text-lg font-black text-[#1f7c8a] uppercase italic text-center mb-4 mt-2">Conditions</h2>
@@ -581,7 +626,6 @@ export default function MapScreen({ userPosition, gpsError, reports }) {
                 </div>
             )}
 
-            {/* CALIBRATION (Outil caché) */}
             <div className="absolute top-24 left-4 z-[130] pointer-events-auto opacity-20 hover:opacity-100">
                 <button onClick={() => setCalibMode(!calibMode)} className="text-white"><Search size={16} /></button>
             </div>

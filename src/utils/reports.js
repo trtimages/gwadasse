@@ -7,7 +7,7 @@ export const HOUR_MS = 60 * 60 * 1000;
 export const DAY_MS = 24 * HOUR_MS;
 
 // Fenêtre "info récente" / décisions
-export const RECENT_WINDOW_MS = 1 * HOUR_MS; // 1 heure (comme tu l'as demandé)
+export const RECENT_WINDOW_MS = 1 * HOUR_MS; // 1 heure
 
 /**
  * Retourne un texte "à l’instant", "12 min", "2 h", "3 j"
@@ -42,8 +42,6 @@ export function countsFromReports(reports) {
 
 /**
  * Agrège les reports des dernières 24h pour une plage donnée.
- * - updatedAgo: "12 min", "2 h", etc.
- * - sargasses/rain/swim: {green,orange,red}
  */
 export function getBeachStatsFromReports(allReports, beachId) {
   const now = Date.now();
@@ -53,33 +51,24 @@ export function getBeachStatsFromReports(allReports, beachId) {
 
   const lastTs = recent.length ? Math.max(...recent.map((r) => r.ts)) : null;
 
+  // HARMONISATION : on utilise sun et crowd au lieu de rain
   const sarg = recent.filter((r) => r.type === "sargasses");
-  const rain = recent.filter((r) => r.type === "rain");
+  const sun = recent.filter((r) => r.type === "sun");
   const swim = recent.filter((r) => r.type === "swim");
+  const crowd = recent.filter((r) => r.type === "crowd");
 
   return {
     updatedAgo: lastTs ? timeAgo(lastTs) : "—",
     sargasses: countsFromReports(sarg),
-    rain: countsFromReports(rain),
+    sun: countsFromReports(sun),
     swim: countsFromReports(swim),
+    crowd: countsFromReports(crowd),
   };
 }
 
 /* =======================
    Decision + reliability (window = 1h)
 ======================= */
-/**
- * Calcule une "décision" pour un type ("sargasses" | "rain" | "swim")
- * sur la fenêtre recentWindow (par défaut 1h).
- *
- * Retour:
- * {
- *   level: 0|1|2|3,
- *   reliability: "faible"|"moyenne"|"élevée",
- *   count: number,
- *   windowLabel: "1 h"
- * }
- */
 export function computeDecision(beachReports, type, windowMs = RECENT_WINDOW_MS) {
   const now = Date.now();
   const recent = beachReports.filter(
@@ -101,7 +90,9 @@ export function computeDecision(beachReports, type, windowMs = RECENT_WINDOW_MS)
   }
 
   const counts = { 1: 0, 2: 0, 3: 0 };
-  for (const r of recent) counts[r.level]++;
+  for (const r of recent) {
+      if (r.level) counts[r.level]++;
+  }
 
   // Dominante + prudence en cas d'égalité : 3 > 2 > 1
   let dominant = 1;
@@ -122,16 +113,7 @@ export function computeDecision(beachReports, type, windowMs = RECENT_WINDOW_MS)
 
 /* =======================
    Marker color (map dots)
-   Règle demandée :
-   - si au moins un évènement est rouge => rouge
-   - sinon moyenne des signalements => vert/orange
-   - si aucun signalement => gris
 ======================= */
-
-/**
- * Retourne les reports récents (fenêtre 1h par défaut) pour une plage.
- * Utile si tu veux debugger/afficher des détails.
- */
 export function getRecentReportsForBeach(allReports, beachId, windowMs = RECENT_WINDOW_MS) {
   const now = Date.now();
   return allReports.filter(
@@ -139,9 +121,6 @@ export function getRecentReportsForBeach(allReports, beachId, windowMs = RECENT_
   );
 }
 
-/**
- * Couleurs par défaut (tu peux les changer facilement ici)
- */
 export const MARKER_COLORS = {
   gray: "#bdbdbd",
   green: "#2e7d32",
@@ -149,52 +128,41 @@ export const MARKER_COLORS = {
   red: "#d32f2f",
 };
 
-/**
- * Calcule une couleur (hex) pour le point de la plage sur la carte.
- * Basé sur TOUS les types (swim/rain/sargasses) sur la fenêtre 1h.
- */
 export function markerColorForBeach(allReports, beachId, windowMs = RECENT_WINDOW_MS) {
   const recent = getRecentReportsForBeach(allReports, beachId, windowMs);
 
   if (recent.length === 0) return MARKER_COLORS.gray;
 
-  // Si au moins un signalement rouge sur n'importe quel type => rouge
   if (recent.some((r) => r.level === 3)) return MARKER_COLORS.red;
 
-  // Sinon on fait la moyenne des niveaux (1..2 ici, car pas de 3)
-  const avg = recent.reduce((sum, r) => sum + r.level, 0) / recent.length;
+  const validLevels = recent.filter(r => r.level);
+  if (validLevels.length === 0) return MARKER_COLORS.green; // Si que des photos sans niveau, on met vert par défaut
 
-  // avg < 1.5 => majoritairement 1 => vert, sinon orange
+  const avg = validLevels.reduce((sum, r) => sum + r.level, 0) / validLevels.length;
+
   return avg < 1.5 ? MARKER_COLORS.green : MARKER_COLORS.orange;
 }
 
-/**
- * Optionnel : renvoie directement un "status" plutôt qu'une couleur.
- * Pratique si tu veux afficher une légende/texte.
- */
 export function markerStatusForBeach(allReports, beachId, windowMs = RECENT_WINDOW_MS) {
   const recent = getRecentReportsForBeach(allReports, beachId, windowMs);
   if (recent.length === 0) return "none";
   if (recent.some((r) => r.level === 3)) return "red";
 
-  const avg = recent.reduce((sum, r) => sum + r.level, 0) / recent.length;
+  const validLevels = recent.filter(r => r.level);
+  if (validLevels.length === 0) return "green";
+
+  const avg = validLevels.reduce((sum, r) => sum + r.level, 0) / validLevels.length;
   return avg < 1.5 ? "green" : "orange";
 }
 
 /* =======================
    Normalization helpers
-   (utile quand beachId peut être string ou number)
 ======================= */
-
-/**
- * Convertit beachId en Number et filtre les reports invalides.
- * À utiliser quand tu lis depuis localStorage / Firestore.
- */
 export function normalizeReports(inputReports) {
   if (!Array.isArray(inputReports)) return [];
   return inputReports
     .map((r) => ({
-      ...r,
+      ...r, // <-- C'est ici que l'imageUrl et le comment sont conservés !
       beachId: typeof r.beachId === "string" ? Number(r.beachId) : r.beachId,
       ts: typeof r.ts === "string" ? Number(r.ts) : r.ts,
       level: typeof r.level === "string" ? Number(r.level) : r.level,
@@ -203,7 +171,8 @@ export function normalizeReports(inputReports) {
       (r) =>
         Number.isFinite(r.beachId) &&
         Number.isFinite(r.ts) &&
-        (r.level === 1 || r.level === 2 || r.level === 3) &&
         typeof r.type === "string"
+        // On a retiré l'obligation absolue d'avoir un niveau 1, 2 ou 3 
+        // pour ne pas bloquer les simples commentaires/photos
     );
 }

@@ -1,14 +1,19 @@
+// src/App.jsx
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import MapScreen from "./screens/MapScreen.jsx";
 import BeachScreen from "./screens/BeachScreen.jsx";
 import ReportScreen from "./screens/ReportScreen.jsx";
-import ProfileScreen from "./screens/ProfileScreen.jsx"; // NOUVEAU
+import ProfileScreen from "./screens/ProfileScreen.jsx";
+import FavoritesScreen from "./screens/FavoritesScreen.jsx";
+import LeaderboardScreen from "./screens/LeaderboardScreen.jsx"; 
 
-// IMPORTS FIREBASE
-import { db, auth } from "./firebase"; // Modifié
-import { collection, addDoc, onSnapshot, query, where, doc, setDoc, updateDoc, increment, getDoc } from "firebase/firestore"; // Modifié
-import { onAuthStateChanged } from "firebase/auth"; // NOUVEAU
+// IMPORTS FIREBASE BDD & AUTH
+import { db, auth, storage } from "./firebase"; 
+import { collection, addDoc, onSnapshot, query, where, doc, setDoc, updateDoc, increment, getDoc } from "firebase/firestore"; 
+import { onAuthStateChanged } from "firebase/auth"; 
+// IMPORTS FIREBASE STORAGE POUR LES IMAGES
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 import { normalizeReports } from "./utils/reports.js";
 import { LanguageProvider } from "./i18n/LanguageContext";
@@ -18,7 +23,7 @@ export default function App() {
     const [gpsError, setGpsError] = useState(null);
     const [reports, setReports] = useState([]); 
     
-    // --- NOUVEAU : ÉTAT UTILISATEUR & PROFIL ---
+    // --- ÉTAT UTILISATEUR & PROFIL ---
     const [user, setUser] = useState(null);
     const [userProfile, setUserProfile] = useState(null);
 
@@ -27,7 +32,6 @@ export default function App() {
         const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
             setUser(currentUser);
             if (currentUser) {
-                // Va chercher ou crée le profil du joueur dans la collection "users"
                 const userRef = doc(db, "users", currentUser.uid);
                 const docSnap = await getDoc(userRef);
                 
@@ -37,12 +41,12 @@ export default function App() {
                         photoURL: currentUser.photoURL || "",
                         xp: 0,
                         reportsCount: 0,
-                        createdAt: new Date().toISOString()
+                        createdAt: new Date().toISOString(),
+                        favorites: [] 
                     };
                     await setDoc(userRef, newProfile);
                 }
                 
-                // Écoute les changements d'XP en temps réel
                 onSnapshot(userRef, (doc) => {
                     if (doc.exists()) setUserProfile(doc.data());
                 });
@@ -70,7 +74,7 @@ export default function App() {
         return () => navigator.geolocation.clearWatch(watchId);
     }, []);
 
-    // --- 2. LOGIQUE FIREBASE (Lecture) ---
+    // --- 2. LOGIQUE FIREBASE (Lecture des signalements) ---
     useEffect(() => {
         const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
         const q = query(collection(db, "reports"), where("ts", ">", twentyFourHoursAgo));
@@ -79,24 +83,59 @@ export default function App() {
             const firebaseReports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const sortedReports = firebaseReports.sort((a, b) => b.ts - a.ts);
             setReports(normalizeReports(sortedReports));
-        }, (error) => console.error("Erreur Firebase:", error));
+        }, (error) => console.error("Erreur Firebase (Lecture Reports):", error));
 
         return () => unsubscribe();
     }, []);
 
-    // --- 3. FONCTION D'AJOUT (+ DISTRIBUTION DES POINTS) ---
+    // --- 3. FONCTION D'AJOUT (+ DISTRIBUTION DES POINTS ET GESTION IMAGE) ---
     const addReports = async (newReports) => {
         try {
-            for (const report of newReports) {
-                await addDoc(collection(db, "reports"), {
-                    ...report,
+            for (let report of newReports) {
+                let imageUrl = null;
+
+                // --- GESTION DE L'IMAGE ---
+                if (report.imageFile) {
+                    try {
+                        console.log("Image détectée, début de l'upload...");
+                        const uniqueFileName = `${Date.now()}_${user ? user.uid : "anonymous"}_${report.imageFile.name}`;
+                        const storageRef = ref(storage, `reports_images/${uniqueFileName}`);
+                        
+                        const uploadResult = await uploadBytes(storageRef, report.imageFile);
+                        console.log("Upload réussi !");
+                        
+                        imageUrl = await getDownloadURL(uploadResult.ref);
+                        console.log("URL de l'image :", imageUrl);
+                    } catch (uploadError) {
+                        console.error("Erreur lors de l'upload de l'image:", uploadError);
+                        alert("Le signalement va être envoyé, mais l'image n'a pas pu être téléchargée.");
+                    }
+                }
+
+                // --- PRÉPARATION DES DONNÉES FINALES ---
+                const finalReportData = {
+                    beachId: report.beachId,
+                    type: report.type,
+                    level: report.level,
+                    ts: Date.now(), 
+                    serverDate: new Date().toISOString(),
                     userId: user ? user.uid : "anonymous",
-                    ts: Date.now(),
-                    serverDate: new Date().toISOString()
-                });
+                };
+
+                if (report.comment && report.comment.trim() !== "") {
+                    finalReportData.comment = report.comment.trim();
+                }
+                
+                if (imageUrl) {
+                    finalReportData.imageUrl = imageUrl;
+                }
+
+                // --- ENREGISTREMENT DANS FIRESTORE ---
+                console.log("Enregistrement du signalement dans la BDD...", finalReportData);
+                await addDoc(collection(db, "reports"), finalReportData);
             }
             
-            // GAMIFICATION : +15 XP par signalement si l'utilisateur est connecté !
+            // GAMIFICATION
             if (user) {
                 const userRef = doc(db, "users", user.uid);
                 await updateDoc(userRef, {
@@ -104,9 +143,10 @@ export default function App() {
                     reportsCount: increment(newReports.length)
                 });
             }
+            console.log("Signalements envoyés avec succès !");
         } catch (e) {
-            console.error("Erreur Firebase:", e);
-            alert("Erreur de connexion à la base de données.");
+            console.error("Erreur Firebase (Écriture Report):", e);
+            alert("Erreur de connexion à la base de données lors de l'envoi du signalement.");
         }
     };
 
@@ -114,12 +154,34 @@ export default function App() {
         <LanguageProvider>
             <BrowserRouter>
                 <Routes>
-                    <Route path="/" element={<MapScreen userPosition={userPosition} gpsError={gpsError} reports={reports} />} />
-                    <Route path="/beach/:beachId" element={<BeachScreen reports={reports} addReports={addReports} userPosition={userPosition} />} />
-                    <Route path="/beach/:beachId/report" element={<ReportScreen addReports={addReports} userPosition={userPosition} gpsError={gpsError} />} />
+                    <Route path="/" element={<MapScreen userPosition={userPosition} gpsError={gpsError} reports={reports} userProfile={userProfile} />} />
                     
-                    {/* NOUVELLE ROUTE POUR LE PROFIL */}
+                    <Route path="/beach/:beachId" element={
+                        <BeachScreen 
+                            reports={reports} 
+                            addReports={addReports} 
+                            userPosition={userPosition} 
+                            user={user} 
+                            userProfile={userProfile} 
+                        />
+                    } />
+                    
+                    <Route path="/beach/:beachId/report" element={
+                        <ReportScreen 
+                            reports={reports} 
+                            addReports={addReports} 
+                            userPosition={userPosition} 
+                            gpsError={gpsError}
+                            user={user} 
+                            userProfile={userProfile} 
+                        />
+                    } />
+                    
                     <Route path="/profile" element={<ProfileScreen user={user} userProfile={userProfile} />} />
+
+                    <Route path="/favorites" element={<FavoritesScreen userProfile={userProfile} reports={reports} />} />
+
+                    <Route path="/leaderboard" element={<LeaderboardScreen currentUser={user} />} />
                 </Routes>
             </BrowserRouter>
         </LanguageProvider>
